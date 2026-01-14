@@ -1,0 +1,32 @@
+[package]
+name = "hegel"
+version = "0.1.0"
+edition = "2021"
+description = "Property-based testing SDK for the Hegel test data generator"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/antithesishq/hegel-rust"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+# float_roundtrip fixes parsing of floats like "0.9999999999999999"
+# See: https://github.com/serde-rs/json/issues/1303
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
+num = "0.4"
+paste = "1.0"
+hegel-derive = { path = "hegel-derive" }
+tempfile = "3"
+
+[dev-dependencies]
+
+[[bin]]
+name = "hegel_workout"
+path = "src/bin/hegel_workout.rs"
+
+[[test]]
+name = "property_tests"
+path = "tests/property_tests.rs"
+
+[[example]]
+name = "embedded_test"
+path = "examples/embedded_test.rs"
