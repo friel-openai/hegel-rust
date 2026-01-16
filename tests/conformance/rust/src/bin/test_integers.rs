@@ -1,5 +1,5 @@
 use hegel::gen::{self, Generate};
-use hegel::{hegel_with_options, HegelOptions};
+use hegel::Hegel;
 use hegel_conformance::{get_test_cases, write};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -27,14 +27,13 @@ fn main() {
         std::process::exit(1);
     });
 
-    hegel_with_options(
-        move || {
-            let value = gen::integers::<i32>()
-                .with_min(params.min_value)
-                .with_max(params.max_value)
-                .generate();
-            write(&Metrics { value });
-        },
-        HegelOptions::new().with_test_cases(get_test_cases()),
-    );
+    Hegel::new(move || {
+        let value = gen::integers::<i32>()
+            .with_min(params.min_value)
+            .with_max(params.max_value)
+            .generate();
+        write(&Metrics { value });
+    })
+    .test_cases(get_test_cases())
+    .run();
 }
