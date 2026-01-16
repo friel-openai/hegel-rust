@@ -7,15 +7,25 @@
 //! # Example
 //!
 //! ```no_run
-//! use hegel::{embedded, gen::{self, Generate}, note};
+//! use hegel::{gen::{self, Generate}, note};
 //!
 //! fn main() {
-//!     embedded::hegel(|| {
+//!     // Simple usage with defaults
+//!     hegel::hegel(|| {
 //!         let x = gen::integers::<i32>().generate();
 //!         let y = gen::integers::<i32>().generate();
 //!         note(&format!("Testing {} + {}", x, y));
 //!         assert_eq!(x + y, y + x);
 //!     });
+//!
+//!     // With options using builder pattern
+//!     hegel::Hegel::new(|| {
+//!         let n = gen::integers::<i32>().generate();
+//!         assert!(n + 0 == n);
+//!     })
+//!     .test_cases(500)
+//!     .verbosity(hegel::Verbosity::Verbose)
+//!     .run();
 //! }
 //! ```
 
@@ -61,56 +71,20 @@ impl Verbosity {
     }
 }
 
-/// Options for embedded mode execution.
-#[derive(Debug, Clone, Default)]
-pub struct HegelOptions {
-    /// Number of test cases to run. Default: 100.
-    pub test_cases: Option<u64>,
-    /// Verbosity level for hegel output. Default: Normal.
-    pub verbosity: Verbosity,
-    /// Path to the hegel binary. Default: auto-detected at compile time.
-    pub hegel_path: Option<String>,
-}
-
-impl HegelOptions {
-    /// Create new options with default values.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set the number of test cases.
-    pub fn with_test_cases(mut self, n: u64) -> Self {
-        self.test_cases = Some(n);
-        self
-    }
-
-    /// Set the verbosity level.
-    pub fn with_verbosity(mut self, verbosity: Verbosity) -> Self {
-        self.verbosity = verbosity;
-        self
-    }
-
-    /// Set the path to the hegel binary.
-    pub fn with_hegel_path(mut self, path: impl Into<String>) -> Self {
-        self.hegel_path = Some(path.into());
-        self
-    }
-}
-
 /// Special marker used to identify assume(false) panics.
 const REJECT_MARKER: &str = "HEGEL_REJECT";
 
 /// Run property-based tests using Hegel in embedded mode with default options.
 ///
-/// This is a convenience wrapper around [`hegel_with_options`] that uses
-/// [`HegelOptions::default()`].
+/// This is a convenience function for simple cases. For configuration options,
+/// use [`Hegel::new`] with the builder pattern.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use hegel::{embedded, gen::{self, Generate}};
+/// use hegel::gen::{self, Generate};
 ///
-/// embedded::hegel(|| {
+/// hegel::hegel(|| {
 ///     let n = gen::integers::<i32>().generate();
 ///     assert!(n + 0 == n); // Identity property
 /// });
@@ -119,99 +93,139 @@ pub fn hegel<F>(test_fn: F)
 where
     F: Fn() + Send + Sync + 'static,
 {
-    hegel_with_options(test_fn, HegelOptions::default());
+    Hegel::new(test_fn).run();
 }
 
-/// Run property-based tests using Hegel in embedded mode.
+/// Builder for running property-based tests with Hegel.
 ///
-/// This function:
-/// 1. Creates a Unix socket server
-/// 2. Spawns the hegel CLI as a subprocess
-/// 3. Accepts connections from hegel (one per test case)
-/// 4. Runs the test function for each test case
-/// 5. Reports results back to hegel
-/// 6. Panics if any test case fails
-///
-/// # Arguments
-///
-/// * `test_fn` - The test function to run. Should use generators from `hegel::gen`.
-/// * `options` - Configuration options for the test run.
-///
-/// # Panics
-///
-/// Panics if:
-/// - Failed to create socket or spawn hegel
-/// - Any test case fails (after shrinking)
-/// - Socket communication errors
+/// Use [`Hegel::new`] to create a builder, configure it with method chains,
+/// then call [`run`](Hegel::run) to execute the tests.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use hegel::{embedded, gen::{self, Generate}};
+/// use hegel::{Hegel, Verbosity, gen::{self, Generate}};
 ///
-/// embedded::hegel_with_options(|| {
+/// Hegel::new(|| {
 ///     let n = gen::integers::<i32>().generate();
-///     assert!(n + 0 == n); // Identity property
-/// }, embedded::HegelOptions::new().with_test_cases(500));
+///     assert!(n + 0 == n);
+/// })
+/// .test_cases(500)
+/// .verbosity(Verbosity::Verbose)
+/// .run();
 /// ```
-pub fn hegel_with_options<F>(test_fn: F, options: HegelOptions)
+pub struct Hegel<F> {
+    test_fn: F,
+    test_cases: Option<u64>,
+    verbosity: Verbosity,
+    hegel_path: Option<String>,
+}
+
+impl<F> Hegel<F>
 where
     F: Fn() + Send + Sync + 'static,
 {
-    // Create temp directory with socket
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let socket_path = temp_dir.path().join("hegel.sock");
-
-    // Create Unix socket server
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind socket");
-
-    // Set non-blocking so we can check if hegel exited
-    listener
-        .set_nonblocking(true)
-        .expect("Failed to set non-blocking");
-
-    // Build hegel command
-    let hegel_path = options.hegel_path.as_deref().unwrap_or(HEGEL_BINARY_PATH);
-    let mut cmd = Command::new(hegel_path);
-    cmd.arg("--client-mode")
-        .arg(&socket_path)
-        .arg("--no-tui")
-        .arg("--verbosity")
-        .arg(options.verbosity.as_str());
-
-    if let Some(n) = options.test_cases {
-        cmd.arg("--test-cases").arg(n.to_string());
+    /// Create a new Hegel test runner with the given test function.
+    pub fn new(test_fn: F) -> Self {
+        Self {
+            test_fn,
+            test_cases: None,
+            verbosity: Verbosity::Normal,
+            hegel_path: None,
+        }
     }
 
-    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    /// Set the number of test cases to run. Default: 100.
+    pub fn test_cases(mut self, n: u64) -> Self {
+        self.test_cases = Some(n);
+        self
+    }
 
-    // Spawn hegel
-    let mut child = cmd.spawn().expect("Failed to spawn hegel");
+    /// Set the verbosity level. Default: Normal.
+    pub fn verbosity(mut self, verbosity: Verbosity) -> Self {
+        self.verbosity = verbosity;
+        self
+    }
 
-    // Accept connections until hegel exits
-    let test_fn = Arc::new(test_fn);
+    /// Set the path to the hegel binary. Default: auto-detected at compile time.
+    pub fn hegel_path(mut self, path: impl Into<String>) -> Self {
+        self.hegel_path = Some(path.into());
+        self
+    }
 
-    loop {
-        // Try to accept a connection
-        match listener.accept() {
-            Ok((stream, _)) => {
-                handle_connection(stream, test_fn.clone(), options.verbosity);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // No connection ready, check if hegel exited
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        handle_exit(status);
-                        break;
-                    }
-                    Ok(None) => {
-                        // Hegel still running, wait a bit
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(e) => panic!("Error waiting for hegel: {}", e),
+    /// Run the property-based tests.
+    ///
+    /// This function:
+    /// 1. Creates a Unix socket server
+    /// 2. Spawns the hegel CLI as a subprocess
+    /// 3. Accepts connections from hegel (one per test case)
+    /// 4. Runs the test function for each test case
+    /// 5. Reports results back to hegel
+    /// 6. Panics if any test case fails
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - Failed to create socket or spawn hegel
+    /// - Any test case fails (after shrinking)
+    /// - Socket communication errors
+    pub fn run(self) {
+        // Create temp directory with socket
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let socket_path = temp_dir.path().join("hegel.sock");
+
+        // Create Unix socket server
+        let listener = UnixListener::bind(&socket_path).expect("Failed to bind socket");
+
+        // Set non-blocking so we can check if hegel exited
+        listener
+            .set_nonblocking(true)
+            .expect("Failed to set non-blocking");
+
+        // Build hegel command
+        let hegel_path = self.hegel_path.as_deref().unwrap_or(HEGEL_BINARY_PATH);
+        let mut cmd = Command::new(hegel_path);
+        cmd.arg("--client-mode")
+            .arg(&socket_path)
+            .arg("--no-tui")
+            .arg("--verbosity")
+            .arg(self.verbosity.as_str());
+
+        if let Some(n) = self.test_cases {
+            cmd.arg("--test-cases").arg(n.to_string());
+        }
+
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+
+        // Spawn hegel
+        let mut child = cmd.spawn().expect("Failed to spawn hegel");
+
+        // Accept connections until hegel exits
+        let test_fn = Arc::new(self.test_fn);
+        let verbosity = self.verbosity;
+
+        loop {
+            // Try to accept a connection
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    handle_connection(stream, test_fn.clone(), verbosity);
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No connection ready, check if hegel exited
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            handle_exit(status);
+                            break;
+                        }
+                        Ok(None) => {
+                            // Hegel still running, wait a bit
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(e) => panic!("Error waiting for hegel: {}", e),
+                    }
+                }
+                Err(e) => panic!("Accept failed: {}", e),
             }
-            Err(e) => panic!("Accept failed: {}", e),
         }
     }
 }
