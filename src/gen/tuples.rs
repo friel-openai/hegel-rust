@@ -30,11 +30,8 @@ where
         let s2 = self.gen2.schema()?;
 
         Some(json!({
-            "type": "array",
-            "prefixItems": [s1, s2],
-            "items": false,
-            "minItems": 2,
-            "maxItems": 2
+            "type": "tuple",
+            "elements": [s1, s2]
         }))
     }
 }
@@ -80,11 +77,8 @@ where
         let s3 = self.gen3.schema()?;
 
         Some(json!({
-            "type": "array",
-            "prefixItems": [s1, s2, s3],
-            "items": false,
-            "minItems": 3,
-            "maxItems": 3
+            "type": "tuple",
+            "elements": [s1, s2, s3]
         }))
     }
 }

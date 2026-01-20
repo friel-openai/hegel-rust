@@ -9,7 +9,7 @@ impl Generate<String> for EmailGenerator {
     }
 
     fn schema(&self) -> Option<Value> {
-        Some(json!({"type": "string", "format": "email"}))
+        Some(json!({"type": "email"}))
     }
 }
 
@@ -25,7 +25,7 @@ impl Generate<String> for UrlGenerator {
     }
 
     fn schema(&self) -> Option<Value> {
-        Some(json!({"type": "string", "format": "uri"}))
+        Some(json!({"type": "url"}))
     }
 }
 
@@ -51,9 +51,8 @@ impl Generate<String> for DomainGenerator {
 
     fn schema(&self) -> Option<Value> {
         Some(json!({
-            "type": "string",
-            "format": "hostname",
-            "maxLength": self.max_length
+            "type": "domain",
+            "max_length": self.max_length
         }))
     }
 }
@@ -91,12 +90,12 @@ impl Generate<String> for IpAddressGenerator {
 
     fn schema(&self) -> Option<Value> {
         match self.version {
-            Some(IpVersion::V4) => Some(json!({"type": "string", "format": "ipv4"})),
-            Some(IpVersion::V6) => Some(json!({"type": "string", "format": "ipv6"})),
+            Some(IpVersion::V4) => Some(json!({"type": "ipv4"})),
+            Some(IpVersion::V6) => Some(json!({"type": "ipv6"})),
             None => Some(json!({
-                "anyOf": [
-                    {"type": "string", "format": "ipv4"},
-                    {"type": "string", "format": "ipv6"}
+                "one_of": [
+                    {"type": "ipv4"},
+                    {"type": "ipv6"}
                 ]
             })),
         }
@@ -115,7 +114,7 @@ impl Generate<String> for DateGenerator {
     }
 
     fn schema(&self) -> Option<Value> {
-        Some(json!({"type": "string", "format": "date"}))
+        Some(json!({"type": "date"}))
     }
 }
 
@@ -131,7 +130,7 @@ impl Generate<String> for TimeGenerator {
     }
 
     fn schema(&self) -> Option<Value> {
-        Some(json!({"type": "string", "format": "time"}))
+        Some(json!({"type": "time"}))
     }
 }
 
@@ -147,7 +146,7 @@ impl Generate<String> for DateTimeGenerator {
     }
 
     fn schema(&self) -> Option<Value> {
-        Some(json!({"type": "string", "format": "date-time"}))
+        Some(json!({"type": "datetime"}))
     }
 }
 

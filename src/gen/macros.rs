@@ -90,19 +90,16 @@ macro_rules! derive_generator {
                 fn schema(&self) -> Option<serde_json::Value> {
                     use $crate::gen::Generate;
 
-                    let mut properties = serde_json::Map::new();
-                    let mut required = Vec::new();
+                    let mut elements = Vec::new();
 
                     $(
                         let field_schema = self.$field_name.schema()?;
-                        properties.insert(stringify!($field_name).to_string(), field_schema);
-                        required.push(serde_json::json!(stringify!($field_name)));
+                        elements.push(field_schema);
                     )*
 
                     Some(serde_json::json!({
-                        "type": "object",
-                        "properties": properties,
-                        "required": required
+                        "type": "tuple",
+                        "elements": elements
                     }))
                 }
             }

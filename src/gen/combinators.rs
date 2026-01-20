@@ -187,8 +187,10 @@ impl<T: Clone + Send + Sync + serde::Serialize> Generate<T> for SampledFromGener
                     return elem.clone();
                 }
             }
-            crate::assume(false);
-            unreachable!()
+            panic!(
+                "hegel: sampled_from received value not in elements list: {}",
+                value
+            );
         } else {
             // Generate index and pick
             let idx_gen = integers::<usize>()
@@ -307,7 +309,7 @@ impl<'a, T: serde::de::DeserializeOwned> Generate<T> for OneOfGenerator<'a, T> {
     fn schema(&self) -> Option<Value> {
         let schemas: Option<Vec<Value>> = self.generators.iter().map(|g| g.schema()).collect();
 
-        schemas.map(|s| json!({"anyOf": s}))
+        schemas.map(|s| json!({"one_of": s}))
     }
 }
 
@@ -355,7 +357,7 @@ where
     fn generate(&self) -> Option<T> {
         if let Some(inner_schema) = self.inner.schema() {
             let schema = json!({
-                "anyOf": [
+                "one_of": [
                     {"type": "null"},
                     inner_schema
                 ]
@@ -379,7 +381,7 @@ where
     fn schema(&self) -> Option<Value> {
         let inner_schema = self.inner.schema()?;
         Some(json!({
-            "anyOf": [
+            "one_of": [
                 {"type": "null"},
                 inner_schema
             ]

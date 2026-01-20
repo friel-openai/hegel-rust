@@ -83,6 +83,8 @@ pub struct FloatGenerator<T> {
     max: Option<T>,
     exclude_min: bool,
     exclude_max: bool,
+    allow_nan: bool,
+    allow_infinity: bool,
 }
 
 impl<T> FloatGenerator<T> {
@@ -109,6 +111,18 @@ impl<T> FloatGenerator<T> {
         self.exclude_max = true;
         self
     }
+
+    /// Allow NaN values to be generated.
+    pub fn allow_nan(mut self) -> Self {
+        self.allow_nan = true;
+        self
+    }
+
+    /// Allow infinity values to be generated.
+    pub fn allow_infinity(mut self) -> Self {
+        self.allow_infinity = true;
+        self
+    }
 }
 
 impl<T> Generate<T> for FloatGenerator<T>
@@ -123,19 +137,25 @@ where
         let mut schema = json!({"type": "number"});
 
         if let Some(ref min) = self.min {
+            schema["minimum"] = json!(min);
             if self.exclude_min {
-                schema["exclusiveMinimum"] = json!(min);
-            } else {
-                schema["minimum"] = json!(min);
+                schema["exclude_minimum"] = json!(true);
             }
         }
 
         if let Some(ref max) = self.max {
+            schema["maximum"] = json!(max);
             if self.exclude_max {
-                schema["exclusiveMaximum"] = json!(max);
-            } else {
-                schema["maximum"] = json!(max);
+                schema["exclude_maximum"] = json!(true);
             }
+        }
+
+        if self.allow_nan {
+            schema["allow_nan"] = json!(true);
+        }
+
+        if self.allow_infinity {
+            schema["allow_infinity"] = json!(true);
         }
 
         Some(schema)
@@ -152,5 +172,7 @@ where
         max: None,
         exclude_min: false,
         exclude_max: false,
+        allow_nan: false,
+        allow_infinity: false,
     }
 }

@@ -55,18 +55,16 @@ where
     fn schema(&self) -> Option<Value> {
         let element_schema = self.elements.schema()?;
 
+        let schema_type = if self.unique { "set" } else { "list" };
+
         let mut schema = json!({
-            "type": "array",
-            "items": element_schema,
-            "minItems": self.min_size
+            "type": schema_type,
+            "elements": element_schema,
+            "min_size": self.min_size
         });
 
         if let Some(max) = self.max_size {
-            schema["maxItems"] = json!(max);
-        }
-
-        if self.unique {
-            schema["uniqueItems"] = json!(true);
+            schema["max_size"] = json!(max);
         }
 
         Some(schema)
@@ -142,14 +140,13 @@ where
         let element_schema = self.elements.schema()?;
 
         let mut schema = json!({
-            "type": "array",
-            "items": element_schema,
-            "minItems": self.min_size,
-            "uniqueItems": true
+            "type": "set",
+            "elements": element_schema,
+            "min_size": self.min_size
         });
 
         if let Some(max) = self.max_size {
-            schema["maxItems"] = json!(max);
+            schema["max_size"] = json!(max);
         }
 
         Some(schema)
@@ -224,13 +221,13 @@ where
         let value_schema = self.values.schema()?;
 
         let mut schema = json!({
-            "type": "object",
-            "additionalProperties": value_schema,
-            "minProperties": self.min_size
+            "type": "dict",
+            "values": value_schema,
+            "min_size": self.min_size
         });
 
         if let Some(max) = self.max_size {
-            schema["maxProperties"] = json!(max);
+            schema["max_size"] = json!(max);
         }
 
         Some(schema)

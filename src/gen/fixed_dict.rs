@@ -55,7 +55,13 @@ pub struct FixedDictGenerator<'a> {
 impl<'a> Generate<Value> for FixedDictGenerator<'a> {
     fn generate(&self) -> Value {
         if let Some(schema) = self.schema() {
-            generate_from_schema(&schema)
+            let values: Vec<Value> = generate_from_schema(&schema);
+            // Convert tuple back to object
+            let mut map = serde_json::Map::new();
+            for ((name, _), value) in self.fields.iter().zip(values) {
+                map.insert(name.clone(), value);
+            }
+            Value::Object(map)
         } else {
             // Compositional fallback
             group(labels::FIXED_DICT, || {
@@ -69,19 +75,16 @@ impl<'a> Generate<Value> for FixedDictGenerator<'a> {
     }
 
     fn schema(&self) -> Option<Value> {
-        let mut properties = serde_json::Map::new();
-        let mut required = Vec::new();
+        let mut elements = Vec::new();
 
-        for (name, gen) in &self.fields {
+        for (_, gen) in &self.fields {
             let field_schema = gen.schema()?;
-            properties.insert(name.clone(), field_schema);
-            required.push(json!(name));
+            elements.push(field_schema);
         }
 
         Some(json!({
-            "type": "object",
-            "properties": properties,
-            "required": required
+            "type": "tuple",
+            "elements": elements
         }))
     }
 }

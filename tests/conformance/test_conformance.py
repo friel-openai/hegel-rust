@@ -17,6 +17,8 @@ def test_conformance():
         # "text": BUILD_DIR / "test_text",  # Disabled due to hypothesis-jsonschema bug
         "lists": BUILD_DIR / "test_lists",
         "sampled_from": BUILD_DIR / "test_sampled_from",
+        "floats_nan": BUILD_DIR / "test_floats_nan",
+        "floats_infinity": BUILD_DIR / "test_floats_infinity",
     }
 
     # Check all binaries exist

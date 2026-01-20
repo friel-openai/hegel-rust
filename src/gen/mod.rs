@@ -254,9 +254,11 @@ pub(crate) fn send_request(command: &str, payload: &Value) -> Value {
 
         let parsed: Value = match serde_json::from_str(&response) {
             Ok(v) => v,
-            Err(_) => {
-                crate::assume(false);
-                unreachable!()
+            Err(e) => {
+                panic!(
+                    "hegel: failed to parse server response as JSON: {}\nResponse: {}",
+                    e, response
+                );
             }
         };
 
@@ -294,9 +296,11 @@ pub fn generate_from_schema<T: serde::de::DeserializeOwned>(schema: &Value) -> T
         eprintln!("Generated: {}", result);
     }
 
-    serde_json::from_value(result.clone()).unwrap_or_else(|_| {
-        crate::assume(false);
-        unreachable!()
+    serde_json::from_value(result.clone()).unwrap_or_else(|e| {
+        panic!(
+            "hegel: failed to deserialize server response: {}\nValue: {}",
+            e, result
+        );
     })
 }
 

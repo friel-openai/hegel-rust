@@ -10,11 +10,15 @@ struct Params {
     max_value: f64,
     exclude_min: bool,
     exclude_max: bool,
+    allow_nan: bool,
+    allow_infinity: bool,
 }
 
 #[derive(Serialize)]
 struct Metrics {
     value: f64,
+    is_nan: bool,
+    is_infinite: bool,
 }
 
 fn main() {
@@ -40,9 +44,19 @@ fn main() {
         if params.exclude_max {
             gen = gen.exclude_max();
         }
+        if params.allow_nan {
+            gen = gen.allow_nan();
+        }
+        if params.allow_infinity {
+            gen = gen.allow_infinity();
+        }
 
         let value = gen.generate();
-        write(&Metrics { value });
+        write(&Metrics {
+            value,
+            is_nan: value.is_nan(),
+            is_infinite: value.is_infinite(),
+        });
     })
     .test_cases(get_test_cases())
     .run();
