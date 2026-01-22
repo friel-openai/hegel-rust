@@ -1,32 +1,42 @@
-"""Conformance tests for hegel-rust SDK."""
-
 from pathlib import Path
 
-from hegel.conformance import run_conformance_tests
+import pytest
 
-# Path to the built conformance binaries
+from hegel.conformance import run_conformance_test
+
 BUILD_DIR = Path(__file__).parent / "rust" / "target" / "release"
 
 
-def test_conformance():
-    """Run all conformance tests against the hegel-rust SDK."""
-    binaries = {
-        "booleans": BUILD_DIR / "test_booleans",
-        "integers": BUILD_DIR / "test_integers",
-        "floats": BUILD_DIR / "test_floats",
-        # "text": BUILD_DIR / "test_text",  # Disabled due to hypothesis-jsonschema bug
-        "lists": BUILD_DIR / "test_lists",
-        "sampled_from": BUILD_DIR / "test_sampled_from",
-        "floats_nan": BUILD_DIR / "test_floats_nan",
-        "floats_infinity": BUILD_DIR / "test_floats_infinity",
-    }
+def test_booleans():
+    run_conformance_test("booleans", BUILD_DIR / "test_booleans")
 
-    # Check all binaries exist
-    missing = [name for name, path in binaries.items() if not path.exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"Missing conformance binaries: {missing}. "
-            f"Run 'cargo build --release' in tests/conformance/rust first."
-        )
 
-    run_conformance_tests(binaries)
+def test_integers():
+    run_conformance_test("integers", BUILD_DIR / "test_integers")
+
+
+def test_floats():
+    run_conformance_test("floats", BUILD_DIR / "test_floats")
+
+
+@pytest.mark.skip(
+    reason="Disabled due to hypothesis-jsonschema bug with Unicode surrogate pairs"
+)
+def test_text():
+    run_conformance_test("text", BUILD_DIR / "test_text")
+
+
+def test_lists():
+    run_conformance_test("lists", BUILD_DIR / "test_lists")
+
+
+def test_sampled_from():
+    run_conformance_test("sampled_from", BUILD_DIR / "test_sampled_from")
+
+
+def test_floats_nan():
+    run_conformance_test("floats", BUILD_DIR / "test_floats_nan")
+
+
+def test_floats_infinity():
+    run_conformance_test("floats", BUILD_DIR / "test_floats_infinity")
