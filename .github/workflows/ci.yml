@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/base
+        with:
+          ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -36,15 +39,12 @@ jobs:
         rust: ['1.62', stable]
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/base
+        with:
+          ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.HEGEL_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
       - run: cargo test
 
   conformance:
@@ -52,16 +52,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/base
+        with:
+          ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.HEGEL_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
       - name: Install hegel
         run: |
           pip install git+ssh://git@github.com/antithesishq/hegel.git
