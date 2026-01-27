@@ -9,3 +9,4 @@ Cargo.lock
 .hegel
 __pycache__
 target/
+.claude/settings.local.json
