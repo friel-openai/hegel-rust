@@ -1,14 +1,51 @@
+//! Random number generator integration with the `rand` crate.
+//!
+//! This module is only available with the `rand` feature enabled.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use hegel::gen::{randoms, Generate};
+//! use rand::Rng;
+//! use rand::seq::SliceRandom;
+//!
+//! # hegel::hegel(|| {
+//! let mut rng = randoms().generate();
+//!
+//! // Use any rand::Rng method
+//! let n: i32 = rng.gen_range(1..=100);
+//! let b: bool = rng.gen();
+//!
+//! // Use rand::seq::SliceRandom
+//! let items = vec![1, 2, 3, 4, 5];
+//! let picked = items.choose(&mut rng);
+//!
+//! let mut to_shuffle = vec![1, 2, 3];
+//! to_shuffle.shuffle(&mut rng);
+//! # });
+//! ```
+
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use serde_json::Value;
 
 use super::{binary, integers, Generate};
 
+/// Generator for [`HegelRandom`] instances.
+///
+/// Created via [`randoms()`].
 pub struct RandomsGenerator {
     use_true_random: bool,
 }
 
 impl RandomsGenerator {
+    /// Use true randomness instead of artificial randomness.
+    ///
+    /// When enabled, a single seed is generated via Hypothesis, then all
+    /// subsequent random operations use a local `StdRng` seeded with that value.
+    ///
+    /// This is faster (no round-trips per operation) but shrinking only
+    /// affects the seed, not individual random values.
     pub fn use_true_random(mut self) -> Self {
         self.use_true_random = true;
         self
@@ -17,7 +54,7 @@ impl RandomsGenerator {
 
 impl Generate<HegelRandom> for RandomsGenerator {
     fn schema(&self) -> Option<Value> {
-        None // Always compositional - no single schema describes this
+        None
     }
 
     fn generate(&self) -> HegelRandom {
@@ -30,14 +67,50 @@ impl Generate<HegelRandom> for RandomsGenerator {
     }
 }
 
+/// Creates a generator for random number generators.
+///
+/// Returns a generator that produces [`HegelRandom`] instances implementing
+/// [`rand::RngCore`]. This enables use with the full `rand` ecosystem including
+/// `rand::Rng` methods and `rand::seq::SliceRandom`.
+///
+/// # Modes
+///
+/// - **Artificial (default)**: Each RNG operation sends a request to Hypothesis,
+///   enabling effective shrinking of random values.
+///
+/// - **True random**: Call [`.use_true_random()`](RandomsGenerator::use_true_random)
+///   to generate a seed once, then use a local RNG. Faster, but only the seed shrinks.
+///
+/// # Example
+///
+/// ```no_run
+/// use hegel::gen::{randoms, Generate};
+/// use rand::Rng;
+///
+/// # hegel::hegel(|| {
+/// let mut rng = randoms().generate();
+/// let x: f64 = rng.gen();
+/// let n = rng.gen_range(1..=100);
+/// # });
+/// ```
 pub fn randoms() -> RandomsGenerator {
     RandomsGenerator {
         use_true_random: false,
     }
 }
 
+/// A random number generator that integrates with Hypothesis.
+///
+/// Implements [`rand::RngCore`], so it can be used anywhere the `rand` crate
+/// expects an RNG. The [`rand::Rng`] trait is automatically available via
+/// blanket impl, providing `gen()`, `gen_range()`, `gen_bool()`, etc.
+///
+/// [`rand::seq::SliceRandom`] also works, providing `choose()`, `shuffle()`,
+/// and `choose_multiple()` on slices.
 pub enum HegelRandom {
+    /// Each operation proxies through Hypothesis for shrinking.
     Artificial,
+    /// Uses a seeded local RNG.
     True(Box<StdRng>),
 }
 
