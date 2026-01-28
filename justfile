@@ -6,3 +6,9 @@ test:
 
 format:
     cargo fmt
+
+coverage:
+    # requires:
+    # * cargo install cargo-llvm-cov
+    # * rustup component add llvm-tools-preview
+    cargo llvm-cov --all-features --fail-under-lines 30 --show-missing-lines
