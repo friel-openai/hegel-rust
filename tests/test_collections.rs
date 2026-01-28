@@ -143,7 +143,7 @@ fn test_vec_of_hashsets() {
         .generate();
         for set in &vec_of_sets {
             assert!(set.len() <= 5);
-            assert!(set.iter().all(|&x| x >= 0 && x <= 100));
+            assert!(set.iter().all(|&x| (0..=100).contains(&x)));
         }
     });
 }
