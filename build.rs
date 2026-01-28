@@ -93,7 +93,7 @@ fn ensure_uv(install_path: &Path) -> PathBuf {
     let status = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR={} INSTALLER_NO_MODIFY_PATH=1 sh",
+            "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR={} UV_NO_MODIFY_PATH=1 sh",
             install_path.display()
         ))
         .status()
