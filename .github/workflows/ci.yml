@@ -88,7 +88,7 @@ jobs:
       - run: RUST_BACKTRACE=1 cargo llvm-cov --all-features --fail-under-lines 30 --show-missing-lines
 
   conformance:
-    name: conformance tests
+    name: conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
