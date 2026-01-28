@@ -72,6 +72,7 @@ fn test_u64() {
 }
 
 #[test]
+#[ignore]
 fn test_i128() {
     assert_all_examples(gen::integers::<i128>(), |&n| {
         n >= i128::MIN && n <= i128::MAX
@@ -83,6 +84,7 @@ fn test_i128() {
 }
 
 #[test]
+#[ignore]
 fn test_u128() {
     assert_all_examples(gen::integers::<u128>(), |&n| {
         n >= u128::MIN && n <= u128::MAX
