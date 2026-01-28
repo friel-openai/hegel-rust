@@ -68,7 +68,7 @@ fn ensure_hegel() -> PathBuf {
         //
         // To avoid any issues like this, we'll isolate uv to always download and install a new
         // python specifically for this build.
-        .env("UV_PYTHON_INSTALL_DIR", &install_path.join("python"))
+        .env("UV_PYTHON_INSTALL_DIR", install_path.join("python"))
         .status()
         .expect("failed to create venv");
     assert!(status.success(), "failed to create venv");
