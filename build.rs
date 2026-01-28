@@ -125,7 +125,6 @@ fn ensure_uv(install_path: &Path) -> PathBuf {
     uv_path
 }
 
-/// Find an executable on PATH.
 fn find_on_path(name: &str) -> Option<PathBuf> {
     env::var_os("PATH").and_then(|paths| {
         env::split_paths(&paths)
