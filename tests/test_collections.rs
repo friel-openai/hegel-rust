@@ -133,6 +133,21 @@ fn test_hashset_with_mapped_elements() {
     });
 }
 
+#[test]
+fn test_vec_of_hashsets() {
+    hegel::hegel(|| {
+        let vec_of_sets: Vec<HashSet<i32>> = gen::vecs(
+            gen::hashsets(gen::integers::<i32>().with_min(0).with_max(100)).with_max_size(5),
+        )
+        .with_max_size(3)
+        .generate();
+        for set in &vec_of_sets {
+            assert!(set.len() <= 5);
+            assert!(set.iter().all(|&x| x >= 0 && x <= 100));
+        }
+    });
+}
+
 // HashMap tests
 
 #[test]
