@@ -110,3 +110,18 @@ jobs:
       - name: Run conformance tests
         working-directory: tests/conformance
         run: pytest test_conformance.py --durations=20 --durations-min=1.0
+
+  nix:
+    name: nix integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/base
+        with:
+          ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
+      - uses: cachix/install-nix-action@v27
+      - name: Build and test
+        working-directory: tests/nix
+        run: |
+          nix build -L 2>&1 | tee build.log
+          grep "test_nix_integration_marker" build.log

@@ -1,6 +1,5 @@
 /target/
 **/*.rs.bk
-Cargo.lock
 .idea/
 .vscode/
 *.swp
@@ -10,3 +9,4 @@ Cargo.lock
 __pycache__
 target/
 .claude/settings.local.json
+result
