@@ -10,8 +10,7 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-    in
-    {
+    in {
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
         pname = "hegel";
         version = "0.1.0";
@@ -19,18 +18,13 @@
         cargoLock.lockFile = ./Cargo.lock;
 
         # hegel binary on PATH so build.rs finds it
-        nativeBuildInputs = [
-          hegel.packages.${system}.default
-        ];
+        nativeBuildInputs = [ hegel.packages.${system}.default ];
 
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        buildInputs = [
-          pkgs.cargo
-          pkgs.rustc
-          hegel.packages.${system}.default
-        ];
+        buildInputs =
+          [ pkgs.cargo pkgs.rustc hegel.packages.${system}.default ];
       };
     };
 }
