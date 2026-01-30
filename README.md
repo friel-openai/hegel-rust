@@ -26,6 +26,8 @@ To use hegel-rust in Nix:
 
 ```nix
 {
+  description = "sandbox";
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     hegel-rust.url = "git+ssh://git@github.com/antithesishq/hegel-rust";
@@ -35,12 +37,26 @@ To use hegel-rust in Nix:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      hegel = hegel-rust.inputs.hegel;
     in
     {
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
-        ...
-        nativeBuildInputs = [ hegel.packages.${system}.default ];
+        pname = "rust-hegel-sandbox";
+        version = "0.1.0";
+        src = ./.;
+        cargoLock.lockFile = ./Cargo.lock;
+
+        # hegel binary on PATH so build.rs finds it
+        nativeBuildInputs = [
+          hegel-rust.packages.${system}.default
+        ];
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        buildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+          hegel-rust.packages.${system}.default
+        ];
       };
     };
 }
