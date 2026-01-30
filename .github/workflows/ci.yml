@@ -121,7 +121,7 @@ jobs:
           ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
       - uses: cachix/install-nix-action@v27
       - name: lint
-        run: nix-shell -p nixfmt --run "nixfmt --check flake.nix tests/nix/flake.nix"
+        run: nix run nixpkgs#nixfmt -- --check flake.nix tests/nix/flake.nix
       - name: test
         working-directory: tests/nix
         run: |
