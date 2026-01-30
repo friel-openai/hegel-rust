@@ -6,11 +6,13 @@
     hegel.url = "git+ssh://git@github.com/antithesishq/hegel";
   };
 
-  outputs = { nixpkgs, hegel, ... }:
+  outputs =
+    { nixpkgs, hegel, ... }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-    in {
+    in
+    {
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
         pname = "hegel";
         version = "0.1.0";
@@ -23,8 +25,11 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        buildInputs =
-          [ pkgs.cargo pkgs.rustc hegel.packages.${system}.default ];
+        buildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+          hegel.packages.${system}.default
+        ];
       };
     };
 }
