@@ -304,7 +304,7 @@ where
             if socket_path.exists() {
                 match UnixStream::connect(&socket_path) {
                     Ok(stream) => break stream,
-                    Err(e) if attempts < 50 => {
+                    Err(_) if attempts < 50 => {
                         // Socket exists but not yet listening
                         std::thread::sleep(Duration::from_millis(100));
                         attempts += 1;
