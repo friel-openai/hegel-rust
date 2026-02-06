@@ -51,22 +51,15 @@ unsafe impl<T, F: Sync> Sync for ComposedGenerator<T, F> {}
 /// This is analogous to Hypothesis's `@composite` decorator. The body can call
 /// `.generate()` on any generators and combine the results in arbitrary ways.
 ///
-/// # Forms
+/// # Example
 ///
 /// ```no_run
 /// use hegel::gen::{self, Generate};
 ///
-/// // Default label (COMPOSE)
 /// let gen = hegel::compose!({
 ///     let x = gen::integers::<i32>().with_min(0).with_max(10).generate();
 ///     let y = gen::integers::<i32>().with_min(x).with_max(100).generate();
 ///     (x, y)
-/// });
-///
-/// // Custom label (evaluated per generate() call)
-/// let gen = hegel::compose!(label: 42, {
-///     let x = gen::integers::<i32>().generate();
-///     x * 2
 /// });
 /// ```
 ///
@@ -74,17 +67,11 @@ unsafe impl<T, F: Sync> Sync for ComposedGenerator<T, F> {}
 ///
 /// The body is wrapped in a labeled span, which helps the testing engine
 /// understand the structure of generated data and improve shrinking.
-/// The label expression and body are both evaluated on each `generate()` call.
 #[macro_export]
 macro_rules! compose {
     ({ $($body:tt)* }) => {
         $crate::gen::ComposedGenerator::new(move || {
             $crate::gen::group($crate::gen::labels::COMPOSE, || { $($body)* })
-        })
-    };
-    (label: $label:expr, { $($body:tt)* }) => {
-        $crate::gen::ComposedGenerator::new(move || {
-            $crate::gen::group($label, || { $($body)* })
         })
     };
 }

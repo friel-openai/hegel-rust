@@ -31,19 +31,6 @@ fn test_compose_dependent_generation() {
 }
 
 #[test]
-fn test_compose_custom_label() {
-    hegel::hegel(|| {
-        let value = hegel::compose!(label: 99, {
-            let a = gen::integers::<i32>().with_min(1).with_max(10).generate();
-            let b = gen::integers::<i32>().with_min(1).with_max(10).generate();
-            a + b
-        })
-        .generate();
-        assert!((2..=20).contains(&value));
-    });
-}
-
-#[test]
 fn test_compose_with_map() {
     hegel::hegel(|| {
         let value = hegel::compose!({
