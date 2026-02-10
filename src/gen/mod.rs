@@ -309,27 +309,112 @@ pub mod labels {
 }
 
 // ============================================================================
+// BasicGenerator - Schema + Transform
+// ============================================================================
+
+/// A basic generator with a schema and client-side transform.
+///
+/// Unlike the `Mapped` type where map() loses the schema,
+/// BasicGenerator preserves the schema through transformations
+/// by composing transform functions.
+///
+/// The transform defaults to identity, making this a drop-in
+/// replacement for schema-backed generators.
+pub struct BasicGenerator<Raw, T, F>
+where
+    Raw: serde::de::DeserializeOwned + Send + Sync,
+    F: Fn(Raw) -> T + Send + Sync,
+    T: Send + Sync,
+{
+    schema: Value,
+    transform_fn: F,
+    _phantom: PhantomData<(Raw, T)>,
+}
+
+impl<Raw, T, F> BasicGenerator<Raw, T, F>
+where
+    Raw: serde::de::DeserializeOwned + Send + Sync,
+    F: Fn(Raw) -> T + Send + Sync,
+    T: Send + Sync,
+{
+    /// Create a new BasicGenerator with a schema and transform function.
+    pub fn new(schema: Value, transform_fn: F) -> Self {
+        Self {
+            schema,
+            transform_fn,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Get the raw schema.
+    pub fn raw_schema(&self) -> &Value {
+        &self.schema
+    }
+
+    /// Transform generated values while preserving the schema.
+    ///
+    /// This shadows the trait's `map` method to preserve schema information.
+    /// The resulting generator has the same schema but applies the additional
+    /// transform after deserialization.
+    pub fn map<U, G>(self, f: G) -> BasicGenerator<Raw, U, impl Fn(Raw) -> U + Send + Sync>
+    where
+        G: Fn(T) -> U + Send + Sync,
+        U: Send + Sync,
+    {
+        let transform = self.transform_fn;
+        BasicGenerator {
+            schema: self.schema,
+            transform_fn: move |raw: Raw| f(transform(raw)),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<Raw, T, F> Generate<T> for BasicGenerator<Raw, T, F>
+where
+    Raw: serde::de::DeserializeOwned + Send + Sync,
+    F: Fn(Raw) -> T + Send + Sync,
+    T: Send + Sync,
+{
+    fn generate(&self) -> T {
+        let raw: Raw = generate_from_schema(&self.schema);
+        (self.transform_fn)(raw)
+    }
+
+    fn schema(&self) -> Option<Value> {
+        Some(self.schema.clone())
+    }
+}
+
+// ============================================================================
 // Generate Trait
 // ============================================================================
 
 /// The core trait for all generators.
 ///
-/// Generators produce values of type `T` and optionally carry a JSON Schema
-/// that describes the values they generate.
+/// Generators produce values of type `T`. Schema support is provided
+/// by the `BasicGenerator` type - generators that contain a BasicGenerator
+/// can use schema-based generation for single-request composition.
 pub trait Generate<T>: Send + Sync {
     /// Generate a value.
     fn generate(&self) -> T;
 
     /// Get the JSON Schema for this generator, if available.
     ///
+    /// Returns `None` by default. Generators backed by a BasicGenerator
+    /// override this to return the schema.
+    ///
     /// Schemas enable composition optimizations where a single request to Hegel
     /// can generate complex nested structures.
-    fn schema(&self) -> Option<Value>;
+    fn schema(&self) -> Option<Value> {
+        None
+    }
 
     /// Transform generated values using a function.
     ///
     /// The resulting generator has no schema since the transformation
-    /// may invalidate the schema's semantics.
+    /// may invalidate the schema's semantics (unless the source is a
+    /// BasicGenerator, which preserves schema through map).
     fn map<U, F>(self, f: F) -> Mapped<T, U, F, Self>
     where
         Self: Sized,

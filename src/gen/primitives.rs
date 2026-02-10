@@ -1,26 +1,18 @@
-use super::{generate_from_schema, Generate};
+use super::{generate_from_schema, BasicGenerator, Generate};
 use serde_json::{json, Value};
+
+/// Generator that always returns the same value.
+///
+/// Uses BasicGenerator with null schema and a value-returning transform.
+pub type JustGenerator<T> = BasicGenerator<(), T, Box<dyn Fn(()) -> T + Send + Sync>>;
 
 pub fn unit() -> JustGenerator<()> {
     just(())
 }
 
-pub struct JustGenerator<T> {
-    value: T,
-}
-
-impl<T: Clone + Send + Sync + serde::Serialize> Generate<T> for JustGenerator<T> {
-    fn generate(&self) -> T {
-        self.value.clone()
-    }
-
-    fn schema(&self) -> Option<Value> {
-        Some(json!({"const": self.value}))
-    }
-}
-
-pub fn just<T: Clone + Send + Sync + serde::Serialize>(value: T) -> JustGenerator<T> {
-    JustGenerator { value }
+/// Create a generator that always returns the same value.
+pub fn just<T: Clone + Send + Sync + 'static>(value: T) -> JustGenerator<T> {
+    BasicGenerator::new(json!({"const": null}), Box::new(move |_: ()| value.clone()))
 }
 
 pub struct JustAnyGenerator<T> {

@@ -1,5 +1,6 @@
 use super::{
-    discardable_group, generate_from_schema, group, integers, labels, request_from_schema, Generate,
+    discardable_group, generate_from_schema, group, integers, labels, request_from_schema,
+    BasicGenerator, Generate,
 };
 use serde_json::{json, Value};
 use std::marker::PhantomData;
@@ -169,61 +170,23 @@ impl<'a, T> Generate<T> for BoxedGenerator<'a, T> {
     }
 }
 
-pub struct SampledFromGenerator<T> {
-    elements: Vec<T>,
-}
+/// Generator type for sampled_from - uses index-based BasicGenerator.
+pub type SampledFromGenerator<T> =
+    BasicGenerator<usize, T, Box<dyn Fn(usize) -> T + Send + Sync>>;
 
-impl<T: Clone + Send + Sync + serde::Serialize> Generate<T> for SampledFromGenerator<T> {
-    fn generate(&self) -> T {
-        crate::assume(!self.elements.is_empty());
-
-        // Check if elements are primitive enough for sampled_from schema
-        if let Some(schema) = self.schema() {
-            let value: Value = generate_from_schema(&schema);
-            // Find matching element
-            for elem in &self.elements {
-                if json!(elem) == value {
-                    return elem.clone();
-                }
-            }
-            panic!(
-                "hegel: sampled_from received value not in elements list: {}",
-                value
-            );
-        } else {
-            // Generate index and pick
-            let idx_gen = integers::<usize>()
-                .with_min(0)
-                .with_max(self.elements.len() - 1);
-            let idx = idx_gen.generate();
-            self.elements[idx].clone()
-        }
-    }
-
-    fn schema(&self) -> Option<Value> {
-        // Only use sampled_from schema for JSON-primitive types
-        let json_values: Vec<Value> = self.elements.iter().map(|e| json!(e)).collect();
-
-        // Check if all values are primitives (not objects/arrays)
-        let all_primitive = json_values.iter().all(|v| {
-            matches!(
-                v,
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
-            )
-        });
-
-        if all_primitive {
-            Some(json!({"sampled_from": json_values}))
-        } else {
-            None
-        }
-    }
-}
-
-pub fn sampled_from<T: Clone + Send + Sync + serde::Serialize>(
-    elements: Vec<T>,
-) -> SampledFromGenerator<T> {
-    SampledFromGenerator { elements }
+/// Sample uniformly from a list of values.
+///
+/// Uses index-based generation with BasicGenerator, which preserves
+/// object identity and works with any type.
+pub fn sampled_from<T: Clone + Send + Sync + 'static>(elements: Vec<T>) -> SampledFromGenerator<T> {
+    assert!(!elements.is_empty(), "sampled_from requires at least one element");
+    let max_idx = elements.len() - 1;
+    let schema = json!({
+        "type": "integer",
+        "minimum": 0,
+        "maximum": max_idx
+    });
+    BasicGenerator::new(schema, Box::new(move |idx: usize| elements[idx].clone()))
 }
 
 pub struct SampledFromSliceGenerator<'a, T> {
