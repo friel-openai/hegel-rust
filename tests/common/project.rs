@@ -38,6 +38,16 @@ hegel = {{ path = "{}" }}
         std::fs::write(project_path.join("Cargo.toml"), cargo_toml)
             .expect("Failed to write Cargo.toml");
 
+        // Copy the main project's Cargo.lock so the temp project uses the same
+        // pinned dependency versions. Without this, cargo resolves fresh and may
+        // pull in crates (e.g. getrandom 0.4+) that require a newer Rust edition
+        // than our MSRV supports.
+        let lock_src = hegel_path.join("Cargo.lock");
+        if lock_src.exists() {
+            std::fs::copy(&lock_src, project_path.join("Cargo.lock"))
+                .expect("Failed to copy Cargo.lock");
+        }
+
         let src_dir = project_path.join("src");
         std::fs::create_dir(&src_dir).expect("Failed to create src directory");
         std::fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");

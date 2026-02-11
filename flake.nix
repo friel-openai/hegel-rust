@@ -8,10 +8,10 @@
   };
 
   outputs =
-    { 
-      nixpkgs, 
-      hegel, 
-      ... 
+    {
+      nixpkgs,
+      hegel,
+      ...
     }:
     let
       supportedSystems = [
@@ -23,20 +23,22 @@
 
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
-    mkHegelRustProject = 
-      {
-        pkgs,
-        system ? pkgs.system,
-      }@args: let
-      in pkgs.rustPlatform.buildRustPackage {
-        pname = "hegel";
-        version = "0.1.0";
-        src = ./.;
-        cargoLock.lockFile = ./Cargo.lock;
+      mkHegelRustProject =
+        {
+          pkgs,
+          system ? pkgs.system,
+        }@args:
+        let
+        in
+        pkgs.rustPlatform.buildRustPackage {
+          pname = "hegel";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
 
-        # hegel binary on PATH so build.rs finds it
-        nativeBuildInputs = [ hegel.packages.${system}.default ];
-      };
+          # hegel binary on PATH so build.rs finds it
+          nativeBuildInputs = [ hegel.packages.${system}.default ];
+        };
     in
     {
 
