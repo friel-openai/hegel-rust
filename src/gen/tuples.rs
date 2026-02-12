@@ -1,13 +1,15 @@
 use super::{group, labels, BasicGenerator, Generate};
 use crate::cbor_helpers::{cbor_array, cbor_map};
 use ciborium::Value;
+use std::marker::PhantomData;
 
-pub struct Tuple2Generator<G1, G2> {
+pub struct Tuple2Generator<G1, G2, T1, T2> {
     gen1: G1,
     gen2: G2,
+    _phantom: PhantomData<fn(T1, T2)>,
 }
 
-impl<T1: 'static, T2: 'static, G1, G2> Generate<(T1, T2)> for Tuple2Generator<G1, G2>
+impl<T1, T2, G1, G2> Generate<(T1, T2)> for Tuple2Generator<G1, G2, T1, T2>
 where
     G1: Generate<T1>,
     G2: Generate<T2>,
@@ -24,7 +26,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<(T1, T2)>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, (T1, T2)>> {
         let basic1 = self.gen1.as_basic()?;
         let basic2 = self.gen2.as_basic()?;
 
@@ -51,18 +53,22 @@ where
 pub fn tuples<T1, T2, G1: Generate<T1>, G2: Generate<T2>>(
     gen1: G1,
     gen2: G2,
-) -> Tuple2Generator<G1, G2> {
-    Tuple2Generator { gen1, gen2 }
+) -> Tuple2Generator<G1, G2, T1, T2> {
+    Tuple2Generator {
+        gen1,
+        gen2,
+        _phantom: PhantomData,
+    }
 }
 
-pub struct Tuple3Generator<G1, G2, G3> {
+pub struct Tuple3Generator<G1, G2, G3, T1, T2, T3> {
     gen1: G1,
     gen2: G2,
     gen3: G3,
+    _phantom: PhantomData<fn(T1, T2, T3)>,
 }
 
-impl<T1: 'static, T2: 'static, T3: 'static, G1, G2, G3> Generate<(T1, T2, T3)>
-    for Tuple3Generator<G1, G2, G3>
+impl<T1, T2, T3, G1, G2, G3> Generate<(T1, T2, T3)> for Tuple3Generator<G1, G2, G3, T1, T2, T3>
 where
     G1: Generate<T1>,
     G2: Generate<T2>,
@@ -81,7 +87,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<(T1, T2, T3)>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, (T1, T2, T3)>> {
         let basic1 = self.gen1.as_basic()?;
         let basic2 = self.gen2.as_basic()?;
         let basic3 = self.gen3.as_basic()?;
@@ -115,6 +121,11 @@ pub fn tuples3<T1, T2, T3, G1: Generate<T1>, G2: Generate<T2>, G3: Generate<T3>>
     gen1: G1,
     gen2: G2,
     gen3: G3,
-) -> Tuple3Generator<G1, G2, G3> {
-    Tuple3Generator { gen1, gen2, gen3 }
+) -> Tuple3Generator<G1, G2, G3, T1, T2, T3> {
+    Tuple3Generator {
+        gen1,
+        gen2,
+        gen3,
+        _phantom: PhantomData,
+    }
 }

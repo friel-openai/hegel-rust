@@ -37,7 +37,7 @@ impl Generate<String> for TextGenerator {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))
@@ -77,7 +77,7 @@ impl Generate<String> for RegexGenerator {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))

@@ -11,14 +11,14 @@ pub struct JustGenerator<T> {
     schema: Option<Value>,
 }
 
-impl<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static> Generate<T>
+impl<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned> Generate<T>
     for JustGenerator<T>
 {
     fn generate(&self) -> T {
         self.value.clone()
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         let schema = self.schema.as_ref()?.clone();
         Some(BasicGenerator::new(schema, |raw| {
             super::deserialize_value(raw)
@@ -53,7 +53,7 @@ impl Generate<bool> for BoolGenerator {
         generate_from_schema(&cbor_map! {"type" => "boolean"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<bool>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, bool>> {
         Some(BasicGenerator::new(
             cbor_map! {"type" => "boolean"},
             super::deserialize_value,

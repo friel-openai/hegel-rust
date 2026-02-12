@@ -258,7 +258,7 @@ fn derive_struct_generate(input: &DeriveInput, data: &syn::DataStruct) -> TokenS
                 }
             }
 
-            fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #name>> {
+            fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #name>> {
                 use hegel::gen::Generate;
 
                 #(#basic_bindings)*
@@ -613,7 +613,7 @@ fn derive_enum_generate(input: &DeriveInput, data: &syn::DataEnum) -> TokenStrea
                     basic.parse_raw(hegel::gen::generate_raw(basic.schema()))
                 }
 
-                fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #enum_name>> {
+                fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #enum_name>> {
                     let schema = #sampled_from_schema;
                     Some(hegel::gen::BasicGenerator::new(schema, |raw| {
                         let selected: String = hegel::gen::deserialize_value(raw);
@@ -752,7 +752,7 @@ fn derive_enum_generate(input: &DeriveInput, data: &syn::DataEnum) -> TokenStrea
                     }
                 }
 
-                fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #enum_name>> {
+                fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #enum_name>> {
                     use hegel::gen::Generate;
 
                     #(#data_variant_basic_bindings)*
@@ -963,7 +963,7 @@ fn generate_variant_generator(enum_name: &syn::Ident, variant: &Variant) -> proc
                         }
                     }
 
-                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #enum_name>> {
+                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #enum_name>> {
                         use hegel::gen::Generate;
 
                         let variant_name_str = stringify!(#variant_name);
@@ -1094,7 +1094,7 @@ fn generate_variant_generator(enum_name: &syn::Ident, variant: &Variant) -> proc
                         }
                     }
 
-                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #enum_name>> {
+                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #enum_name>> {
                         use hegel::gen::Generate;
 
                         let variant_name_str = stringify!(#variant_name);
@@ -1270,7 +1270,7 @@ fn generate_variant_generator(enum_name: &syn::Ident, variant: &Variant) -> proc
                         }
                     }
 
-                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator< #enum_name>> {
+                    fn as_basic(&self) -> Option<hegel::gen::BasicGenerator<'_, #enum_name>> {
                         use hegel::gen::Generate;
 
                         let variant_name_str = stringify!(#variant_name);

@@ -9,12 +9,12 @@ pub(crate) struct MappedToValue<T, G> {
     _phantom: PhantomData<fn() -> T>,
 }
 
-impl<T: serde::Serialize + 'static, G: Generate<T>> Generate<Value> for MappedToValue<T, G> {
+impl<T: serde::Serialize, G: Generate<T>> Generate<Value> for MappedToValue<T, G> {
     fn generate(&self) -> Value {
         crate::cbor_helpers::cbor_serialize(&self.inner.generate())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<Value>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Value>> {
         let inner_basic = self.inner.as_basic()?;
         let schema = inner_basic.schema().clone();
         Some(BasicGenerator::new(schema, move |raw| {
@@ -32,7 +32,7 @@ impl<'a> FixedDictBuilder<'a> {
     pub fn field<T, G>(mut self, name: &str, gen: G) -> Self
     where
         G: Generate<T> + Send + Sync + 'a,
-        T: serde::Serialize + 'static,
+        T: serde::Serialize + 'a,
     {
         let boxed = BoxedGenerator {
             inner: Arc::new(MappedToValue {
@@ -72,8 +72,8 @@ impl<'a> Generate<Value> for FixedDictGenerator<'a> {
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<Value>> {
-        let basics: Vec<BasicGenerator<Value>> = self
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Value>> {
+        let basics: Vec<BasicGenerator<'_, Value>> = self
             .fields
             .iter()
             .map(|(_, gen)| gen.as_basic())

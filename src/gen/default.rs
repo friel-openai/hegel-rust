@@ -107,34 +107,33 @@ impl DefaultGenerator for f64 {
     }
 }
 
-impl<T: DefaultGenerator + 'static> DefaultGenerator for Option<T>
+impl<T: DefaultGenerator> DefaultGenerator for Option<T>
 where
     T::Generator: Send + Sync,
 {
-    type Generator = OptionalGenerator<T::Generator>;
+    type Generator = OptionalGenerator<T::Generator, T>;
     fn default_generator() -> Self::Generator {
         optional(T::default_generator())
     }
 }
 
-impl<T: DefaultGenerator + 'static> DefaultGenerator for Vec<T>
+impl<T: DefaultGenerator> DefaultGenerator for Vec<T>
 where
     T::Generator: Send + Sync,
 {
-    type Generator = VecGenerator<T::Generator>;
+    type Generator = VecGenerator<T::Generator, T>;
     fn default_generator() -> Self::Generator {
         vecs(T::default_generator())
     }
 }
 
-impl<K: DefaultGenerator + 'static, V: DefaultGenerator + 'static> DefaultGenerator
-    for HashMap<K, V>
+impl<K: DefaultGenerator, V: DefaultGenerator> DefaultGenerator for HashMap<K, V>
 where
     K: Eq + Hash,
     K::Generator: Send + Sync,
     V::Generator: Send + Sync,
 {
-    type Generator = HashMapGenerator<K::Generator, V::Generator>;
+    type Generator = HashMapGenerator<K::Generator, V::Generator, K, V>;
     fn default_generator() -> Self::Generator {
         hashmaps(K::default_generator(), V::default_generator())
     }

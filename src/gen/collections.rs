@@ -3,6 +3,7 @@ use crate::cbor_helpers::{cbor_map, map_insert};
 use ciborium::Value;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::marker::PhantomData;
 
 /// Extract an array from a Value, handling both plain Arrays and CBOR Tag(258, Array)
 /// which is the standard CBOR tag for sets.
@@ -17,14 +18,15 @@ fn extract_array(raw: Value) -> Vec<Value> {
     }
 }
 
-pub struct VecGenerator<G> {
+pub struct VecGenerator<G, T> {
     pub(crate) elements: G,
     pub(crate) min_size: usize,
     pub(crate) max_size: Option<usize>,
     pub(crate) unique: bool,
+    pub(crate) _phantom: PhantomData<fn(T)>,
 }
 
-impl<G> VecGenerator<G> {
+impl<G, T> VecGenerator<G, T> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -41,7 +43,7 @@ impl<G> VecGenerator<G> {
     }
 }
 
-impl<T: 'static, G> Generate<Vec<T>> for VecGenerator<G>
+impl<T, G> Generate<Vec<T>> for VecGenerator<G, T>
 where
     G: Generate<T>,
 {
@@ -62,7 +64,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<Vec<T>>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<T>>> {
         let elem_basic = self.elements.as_basic()?;
         let elem_schema = elem_basic.schema().clone();
 
@@ -86,22 +88,24 @@ where
 }
 
 /// Generate vectors (lists).
-pub fn vecs<T, G: Generate<T>>(elements: G) -> VecGenerator<G> {
+pub fn vecs<T, G: Generate<T>>(elements: G) -> VecGenerator<G, T> {
     VecGenerator {
         elements,
         min_size: 0,
         max_size: None,
         unique: false,
+        _phantom: PhantomData,
     }
 }
 
-pub struct HashSetGenerator<G> {
+pub struct HashSetGenerator<G, T> {
     elements: G,
     min_size: usize,
     max_size: Option<usize>,
+    _phantom: PhantomData<fn(T)>,
 }
 
-impl<G> HashSetGenerator<G> {
+impl<G, T> HashSetGenerator<G, T> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -113,7 +117,7 @@ impl<G> HashSetGenerator<G> {
     }
 }
 
-impl<T: 'static, G> Generate<HashSet<T>> for HashSetGenerator<G>
+impl<T, G> Generate<HashSet<T>> for HashSetGenerator<G, T>
 where
     G: Generate<T>,
     T: Eq + Hash,
@@ -141,7 +145,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<HashSet<T>>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, HashSet<T>>> {
         let elem_basic = self.elements.as_basic()?;
         let elem_schema = elem_basic.schema().clone();
 
@@ -162,22 +166,24 @@ where
     }
 }
 
-pub fn hashsets<T, G: Generate<T>>(elements: G) -> HashSetGenerator<G> {
+pub fn hashsets<T, G: Generate<T>>(elements: G) -> HashSetGenerator<G, T> {
     HashSetGenerator {
         elements,
         min_size: 0,
         max_size: None,
+        _phantom: PhantomData,
     }
 }
 
-pub struct HashMapGenerator<K, V> {
+pub struct HashMapGenerator<K, V, KT, VT> {
     keys: K,
     values: V,
     min_size: usize,
     max_size: Option<usize>,
+    _phantom: PhantomData<fn(KT, VT)>,
 }
 
-impl<K, V> HashMapGenerator<K, V> {
+impl<K, V, KT, VT> HashMapGenerator<K, V, KT, VT> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -189,7 +195,7 @@ impl<K, V> HashMapGenerator<K, V> {
     }
 }
 
-impl<K, V, KT: 'static, VT: 'static> Generate<HashMap<KT, VT>> for HashMapGenerator<K, V>
+impl<K, V, KT, VT> Generate<HashMap<KT, VT>> for HashMapGenerator<K, V, KT, VT>
 where
     K: Generate<KT>,
     V: Generate<VT>,
@@ -223,7 +229,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<HashMap<KT, VT>>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, HashMap<KT, VT>>> {
         let key_basic = self.keys.as_basic()?;
         let val_basic = self.values.as_basic()?;
 
@@ -281,11 +287,15 @@ where
 /// // Integer keys
 /// let int_keyed: HashMap<i32, String> = hashmaps(integers(), text()).generate();
 /// ```
-pub fn hashmaps<K, V>(keys: K, values: V) -> HashMapGenerator<K, V> {
+pub fn hashmaps<KT, VT, K: Generate<KT>, V: Generate<VT>>(
+    keys: K,
+    values: V,
+) -> HashMapGenerator<K, V, KT, VT> {
     HashMapGenerator {
         keys,
         values,
         min_size: 0,
         max_size: None,
+        _phantom: PhantomData,
     }
 }

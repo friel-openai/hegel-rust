@@ -1,7 +1,7 @@
 use super::{
     discardable_group, generate_from_schema, group, integers, labels, BasicGenerator, Generate,
 };
-use crate::cbor_helpers::{cbor_array, cbor_map, cbor_serialize};
+use crate::cbor_helpers::{cbor_array, cbor_map};
 use ciborium::Value;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -12,10 +12,10 @@ pub struct Mapped<T, U, F, G> {
     pub(crate) _phantom: PhantomData<fn(T) -> U>,
 }
 
-impl<T: 'static, U: 'static, F, G> Generate<U> for Mapped<T, U, F, G>
+impl<T, U, F, G> Generate<U> for Mapped<T, U, F, G>
 where
     G: Generate<T>,
-    F: Fn(T) -> U + Send + Sync + 'static,
+    F: Fn(T) -> U + Send + Sync,
 {
     fn generate(&self) -> U {
         if let Some(basic) = self.as_basic() {
@@ -25,7 +25,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<U>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, U>> {
         let source_basic = self.source.as_basic()?;
         let f = Arc::clone(&self.f);
         Some(source_basic.map(move |t| f(t)))
@@ -113,7 +113,7 @@ impl<'a, T> Generate<T> for BoxedGenerator<'a, T> {
         self.inner.generate()
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         self.inner.as_basic()
     }
 
@@ -130,7 +130,7 @@ pub struct SampledFromGenerator<T> {
     elements: Vec<T>,
 }
 
-impl<T: Clone + Send + Sync + 'static> Generate<T> for SampledFromGenerator<T> {
+impl<T: Clone + Send + Sync> Generate<T> for SampledFromGenerator<T> {
     fn generate(&self) -> T {
         crate::assume(!self.elements.is_empty());
 
@@ -146,7 +146,7 @@ impl<T: Clone + Send + Sync + 'static> Generate<T> for SampledFromGenerator<T> {
         self.elements[idx].clone()
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         if self.elements.is_empty() {
             return None;
         }
@@ -164,71 +164,15 @@ impl<T: Clone + Send + Sync + 'static> Generate<T> for SampledFromGenerator<T> {
     }
 }
 
-pub fn sampled_from<T: Clone + Send + Sync + 'static>(elements: Vec<T>) -> SampledFromGenerator<T> {
+pub fn sampled_from<T: Clone + Send + Sync>(elements: Vec<T>) -> SampledFromGenerator<T> {
     SampledFromGenerator { elements }
-}
-
-pub struct SampledFromSliceGenerator<'a, T> {
-    elements: &'a [T],
-}
-
-impl<'a, T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static>
-    Generate<T> for SampledFromSliceGenerator<'a, T>
-{
-    fn generate(&self) -> T {
-        crate::assume(!self.elements.is_empty());
-
-        if let Some(basic) = self.as_basic() {
-            basic.generate()
-        } else {
-            // Compositional fallback
-            group(labels::SAMPLED_FROM, || {
-                let idx = integers::<usize>()
-                    .with_min(0)
-                    .with_max(self.elements.len() - 1)
-                    .generate();
-                self.elements[idx].clone()
-            })
-        }
-    }
-
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
-        if self.elements.is_empty() {
-            return None;
-        }
-        let cbor_values: Vec<Value> = self.elements.iter().map(|e| cbor_serialize(e)).collect();
-        let schema = cbor_map! {"sampled_from" => Value::Array(cbor_values)};
-        Some(BasicGenerator::new(schema, super::deserialize_value::<T>))
-    }
-}
-
-/// Sample uniformly from a borrowed slice.
-///
-/// This allows creating generators that borrow from local data,
-/// enabling non-`'static` lifetimes.
-///
-/// # Example
-///
-/// ```no_run
-/// use hegel::gen::{self, Generate, BoxedGenerator};
-///
-/// let choices = vec!["apple".to_string(), "banana".to_string(), "cherry".to_string()];
-/// let gen: BoxedGenerator<'_, String> = gen::sampled_from_slice(&choices).boxed();
-/// let value = gen.generate();
-/// ```
-pub fn sampled_from_slice<
-    T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned + 'static,
->(
-    elements: &[T],
-) -> SampledFromSliceGenerator<'_, T> {
-    SampledFromSliceGenerator { elements }
 }
 
 pub struct OneOfGenerator<'a, T> {
     generators: Vec<BoxedGenerator<'a, T>>,
 }
 
-impl<'a, T: 'static> Generate<T> for OneOfGenerator<'a, T> {
+impl<'a, T> Generate<T> for OneOfGenerator<'a, T> {
     fn generate(&self) -> T {
         crate::assume(!self.generators.is_empty());
 
@@ -246,8 +190,8 @@ impl<'a, T: 'static> Generate<T> for OneOfGenerator<'a, T> {
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
-        let basics: Vec<BasicGenerator<T>> = self
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
+        let basics: Vec<BasicGenerator<'_, T>> = self
             .generators
             .iter()
             .map(|g| g.as_basic())
@@ -319,11 +263,12 @@ macro_rules! one_of {
     };
 }
 
-pub struct OptionalGenerator<G> {
+pub struct OptionalGenerator<G, T> {
     inner: G,
+    _phantom: PhantomData<fn(T)>,
 }
 
-impl<T: 'static, G> Generate<Option<T>> for OptionalGenerator<G>
+impl<T, G> Generate<Option<T>> for OptionalGenerator<G, T>
 where
     G: Generate<T>,
 {
@@ -343,7 +288,7 @@ where
         }
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<Option<T>>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Option<T>>> {
         let inner_basic = self.inner.as_basic()?;
         let inner_schema = inner_basic.schema().clone();
 
@@ -387,6 +332,9 @@ where
     }
 }
 
-pub fn optional<T, G: Generate<T>>(inner: G) -> OptionalGenerator<G> {
-    OptionalGenerator { inner }
+pub fn optional<T, G: Generate<T>>(inner: G) -> OptionalGenerator<G, T> {
+    OptionalGenerator {
+        inner,
+        _phantom: PhantomData,
+    }
 }

@@ -132,7 +132,7 @@ impl Generate<Vec<u8>> for BinaryGenerator {
         parse_binary(super::generate_raw(&self.build_schema()))
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<Vec<u8>>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<u8>>> {
         Some(BasicGenerator::new(self.build_schema(), parse_binary))
     }
 }

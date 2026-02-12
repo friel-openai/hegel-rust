@@ -18,7 +18,7 @@ mod value;
 pub use self::basic::BasicGenerator;
 pub use binary::binary;
 pub use collections::{hashmaps, hashsets, vecs, HashMapGenerator};
-pub use combinators::{one_of, optional, sampled_from, sampled_from_slice, BoxedGenerator};
+pub use combinators::{one_of, optional, sampled_from, BoxedGenerator};
 pub use compose::{fnv1a_hash, ComposedGenerator};
 pub use default::DefaultGenerator;
 pub use fixed_dict::fixed_dicts;
@@ -492,18 +492,17 @@ pub mod basic {
 
     /// A bundled schema + parse function for schema-based generation.
     ///
-    /// The parse closure is `'static`, meaning it must own all its captures.
-    /// This is always achievable because composite generators move their
-    /// `BasicGenerator`s into the new parse closure.
-    pub struct BasicGenerator<T> {
+    /// The lifetime `'a` ties the BasicGenerator to the generator that created it.
+    /// `T: 'a` is required because the parse closure returns `T`.
+    pub struct BasicGenerator<'a, T> {
         schema: Value,
-        parse: Box<dyn Fn(Value) -> T + Send + Sync>,
+        parse: Box<dyn Fn(Value) -> T + Send + Sync + 'a>,
         _phantom: PhantomData<fn() -> T>,
     }
 
-    impl<T: 'static> BasicGenerator<T> {
+    impl<'a, T: 'a> BasicGenerator<'a, T> {
         /// Create a new BasicGenerator from a schema and parse function.
-        pub fn new<F: Fn(Value) -> T + Send + Sync + 'static>(schema: Value, f: F) -> Self {
+        pub fn new<F: Fn(Value) -> T + Send + Sync + 'a>(schema: Value, f: F) -> Self {
             BasicGenerator {
                 schema,
                 parse: Box::new(f),
@@ -532,7 +531,7 @@ pub mod basic {
         ///
         /// The resulting BasicGenerator shares the same schema but applies `f`
         /// after parsing.
-        pub fn map<U, F: Fn(T) -> U + Send + Sync + 'static>(self, f: F) -> BasicGenerator<U> {
+        pub fn map<U: 'a, F: Fn(T) -> U + Send + Sync + 'a>(self, f: F) -> BasicGenerator<'a, U> {
             let old_parse = self.parse;
             BasicGenerator {
                 schema: self.schema,
@@ -562,7 +561,7 @@ pub trait Generate<T>: Send + Sync {
     ///
     /// Returns `None` for generators that cannot be expressed as a schema
     /// (e.g., after `flat_map` or `filter`).
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         None
     }
 
@@ -575,7 +574,7 @@ pub trait Generate<T>: Send + Sync {
     fn map<U, F>(self, f: F) -> Mapped<T, U, F, Self>
     where
         Self: Sized,
-        F: Fn(T) -> U + Send + Sync + 'static,
+        F: Fn(T) -> U + Send + Sync,
     {
         Mapped {
             source: self,
@@ -638,7 +637,7 @@ impl<T, G: Generate<T>> Generate<T> for &G {
         (*self).generate()
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         (*self).as_basic()
     }
 }

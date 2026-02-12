@@ -42,20 +42,13 @@ where
 
 impl<T> Generate<T> for IntegerGenerator<T>
 where
-    T: serde::de::DeserializeOwned
-        + serde::Serialize
-        + Bounded
-        + NumInteger
-        + Send
-        + Sync
-        + Copy
-        + 'static,
+    T: serde::de::DeserializeOwned + serde::Serialize + Bounded + NumInteger + Send + Sync + Copy,
 {
     fn generate(&self) -> T {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))
@@ -184,13 +177,13 @@ where
 
 impl<T> Generate<T> for FloatGenerator<T>
 where
-    T: serde::de::DeserializeOwned + serde::Serialize + NumFloat + Send + Sync + 'static,
+    T: serde::de::DeserializeOwned + serde::Serialize + NumFloat + Send + Sync,
 {
     fn generate(&self) -> T {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<T>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))

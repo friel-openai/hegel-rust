@@ -9,7 +9,7 @@ impl Generate<String> for EmailGenerator {
         generate_from_schema(&cbor_map! {"type" => "email"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(cbor_map! {"type" => "email"}, |raw| {
             super::deserialize_value(raw)
         }))
@@ -27,7 +27,7 @@ impl Generate<String> for UrlGenerator {
         generate_from_schema(&cbor_map! {"type" => "url"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(cbor_map! {"type" => "url"}, |raw| {
             super::deserialize_value(raw)
         }))
@@ -61,7 +61,7 @@ impl Generate<String> for DomainGenerator {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))
@@ -112,7 +112,7 @@ impl Generate<String> for IpAddressGenerator {
         generate_from_schema(&self.build_schema())
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(self.build_schema(), |raw| {
             super::deserialize_value(raw)
         }))
@@ -130,7 +130,7 @@ impl Generate<String> for DateGenerator {
         generate_from_schema(&cbor_map! {"type" => "date"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(cbor_map! {"type" => "date"}, |raw| {
             super::deserialize_value(raw)
         }))
@@ -148,7 +148,7 @@ impl Generate<String> for TimeGenerator {
         generate_from_schema(&cbor_map! {"type" => "time"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(cbor_map! {"type" => "time"}, |raw| {
             super::deserialize_value(raw)
         }))
@@ -166,7 +166,7 @@ impl Generate<String> for DateTimeGenerator {
         generate_from_schema(&cbor_map! {"type" => "datetime"})
     }
 
-    fn as_basic(&self) -> Option<BasicGenerator<String>> {
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
         Some(BasicGenerator::new(
             cbor_map! {"type" => "datetime"},
             super::deserialize_value,
