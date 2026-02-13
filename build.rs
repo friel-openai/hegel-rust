@@ -17,7 +17,7 @@ fn main() {
 fn ensure_hegel() -> PathBuf {
     if let Some(path) = find_on_path("hegel") {
         eprintln!("found hegel on path: {}", path.display());
-        return path;
+        path
     } else {
         eprintln!("Could not find hegel on path. Using default value of 'hegel'");
         "hegel".into()

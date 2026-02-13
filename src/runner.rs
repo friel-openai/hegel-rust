@@ -296,6 +296,7 @@ where
             eprintln!("Starting hegeld: {:?}", cmd);
         }
 
+         #[allow(clippy::expect_fun_call)] // Nonsense warning: string allocation is insignificant next to spawning a process
         let mut child = cmd
             .spawn()
             .expect(format!("Failed to spawn hegel at path {}", hegel_path).as_str());
