@@ -1,5 +1,5 @@
 use super::{generate_from_schema, BasicGenerator, Generate};
-use crate::cbor_helpers::{cbor_map, cbor_serialize};
+use crate::cbor_helpers::cbor_map;
 use ciborium::Value;
 
 pub fn unit() -> JustGenerator<()> {
@@ -8,42 +8,24 @@ pub fn unit() -> JustGenerator<()> {
 
 pub struct JustGenerator<T> {
     value: T,
-    schema: Option<Value>,
 }
 
-impl<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned> Generate<T>
-    for JustGenerator<T>
-{
+impl<T: Clone + Send + Sync> Generate<T> for JustGenerator<T> {
     fn generate(&self) -> T {
         self.value.clone()
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
-        let schema = self.schema.as_ref()?.clone();
-        Some(BasicGenerator::new(schema, |raw| {
-            super::deserialize_value(raw)
-        }))
+        let value = self.value.clone();
+        Some(BasicGenerator::new(
+            cbor_map! {"const" => Value::Null},
+            move |_| value.clone(),
+        ))
     }
 }
 
-pub fn just<T: Clone + Send + Sync + serde::Serialize + serde::de::DeserializeOwned>(
-    value: T,
-) -> JustGenerator<T> {
-    let schema = Some(cbor_map! {"const" => cbor_serialize(&value)});
-    JustGenerator { value, schema }
-}
-
-pub struct JustAnyGenerator<T> {
-    value: T,
-}
-
-impl<T: Clone + Send + Sync> Generate<T> for JustAnyGenerator<T> {
-    fn generate(&self) -> T {
-        self.value.clone()
-    }
-}
-pub fn just_any<T: Clone + Send + Sync>(value: T) -> JustAnyGenerator<T> {
-    JustAnyGenerator { value }
+pub fn just<T: Clone + Send + Sync>(value: T) -> JustGenerator<T> {
+    JustGenerator { value }
 }
 
 pub struct BoolGenerator;

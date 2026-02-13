@@ -24,7 +24,7 @@ pub use default::DefaultGenerator;
 pub use fixed_dict::fixed_dicts;
 pub use formats::{dates, datetimes, domains, emails, ip_addresses, times, urls};
 pub use numeric::{floats, integers};
-pub use primitives::{booleans, just, just_any, unit};
+pub use primitives::{booleans, just, unit};
 #[cfg(feature = "rand")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rand")))]
 pub use random::{randoms, HegelRandom, RandomsGenerator};
