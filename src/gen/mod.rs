@@ -15,15 +15,16 @@ mod tuples;
 mod value;
 
 // public api
+pub use self::basic::BasicGenerator;
 pub use binary::binary;
 pub use collections::{hashmaps, hashsets, vecs, HashMapGenerator};
-pub use combinators::{one_of, optional, sampled_from, sampled_from_slice, BoxedGenerator};
+pub use combinators::{one_of, optional, sampled_from, BoxedGenerator};
 pub use compose::{fnv1a_hash, ComposedGenerator};
 pub use default::DefaultGenerator;
 pub use fixed_dict::fixed_dicts;
 pub use formats::{dates, datetimes, domains, emails, ip_addresses, times, urls};
 pub use numeric::{floats, integers};
-pub use primitives::{booleans, just, just_any, unit};
+pub use primitives::{booleans, just, unit};
 #[cfg(feature = "rand")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rand")))]
 pub use random::{randoms, HegelRandom, RandomsGenerator};
@@ -232,32 +233,45 @@ pub(crate) fn request_from_schema(schema: &Value) -> Result<Value, StopTestError
     send_request("generate", &cbor_map! {"schema" => schema.clone()})
 }
 
-/// Generate a value from a schema.
-pub fn generate_from_schema<T: serde::de::DeserializeOwned>(schema: &Value) -> T {
-    let result = match request_from_schema(schema) {
-        Ok(v) => v,
+/// Deserialize a raw CBOR value into a Rust type.
+///
+/// This is a public helper for use by derived generators (proc macros)
+/// that need to deserialize individual field values from CBOR.
+pub fn deserialize_value<T: serde::de::DeserializeOwned>(raw: Value) -> T {
+    let hv = value::HegelValue::from(raw.clone());
+    value::from_hegel_value(hv).unwrap_or_else(|e| {
+        panic!(
+            "hegel: failed to deserialize value: {}\nValue: {:?}",
+            e, raw
+        );
+    })
+}
+
+/// Send a schema to the server and return the raw CBOR response.
+///
+/// This is the core generation primitive. It handles StopTest errors
+/// and buffers the generated value for last-run display.
+pub fn generate_raw(schema: &Value) -> Value {
+    match request_from_schema(schema) {
+        Ok(v) => {
+            if is_last_run() {
+                buffer_generated_value(&format!(
+                    "Generated: {}",
+                    crate::cbor_helpers::display_value(&v)
+                ));
+            }
+            v
+        }
         Err(StopTestError) => {
-            // Server ran out of data - reject this test case
             crate::assume(false);
             unreachable!("assume(false) should not return")
         }
-    };
-
-    if is_last_run() {
-        buffer_generated_value(&format!(
-            "Generated: {}",
-            crate::cbor_helpers::display_value(&result)
-        ));
     }
+}
 
-    // Convert to HegelValue — ciborium::Value natively preserves NaN/Infinity
-    let hegel_value = value::HegelValue::from(result.clone());
-    value::from_hegel_value(hegel_value).unwrap_or_else(|e| {
-        panic!(
-            "hegel: failed to deserialize server response: {}\nValue: {:?}",
-            e, result
-        );
-    })
+/// Generate a value from a schema, deserializing the result.
+pub fn generate_from_schema<T: serde::de::DeserializeOwned>(schema: &Value) -> T {
+    deserialize_value(generate_raw(schema))
 }
 
 /// Start a span for grouping related generation.
@@ -456,10 +470,76 @@ pub mod labels {
     pub const FIXED_DICT: u64 = 10;
     pub const FLAT_MAP: u64 = 11;
     pub const FILTER: u64 = 12;
-    pub const ENUM_VARIANT: u64 = 13;
-    pub const SAMPLED_FROM: u64 = 14;
     /// For .map() transformations (distinct from MAP which is for collections)
-    pub const MAPPED: u64 = 15;
+    pub const MAPPED: u64 = 13;
+    pub const SAMPLED_FROM: u64 = 14;
+    pub const ENUM_VARIANT: u64 = 15;
+}
+
+// ============================================================================
+// BasicGenerator
+// ============================================================================
+
+/// A basic generator bundles a schema with a parse function.
+///
+/// This is the key abstraction for schema-based generation. Generators that
+/// can be expressed as a single schema implement `as_basic()` to return one.
+/// Combinators like `map()` compose BasicGenerators by chaining parse functions
+/// while preserving the schema.
+pub mod basic {
+    use ciborium::Value;
+    use std::marker::PhantomData;
+
+    /// A bundled schema + parse function for schema-based generation.
+    ///
+    /// The lifetime `'a` ties the BasicGenerator to the generator that created it.
+    /// `T: 'a` is required because the parse closure returns `T`.
+    pub struct BasicGenerator<'a, T> {
+        schema: Value,
+        parse: Box<dyn Fn(Value) -> T + Send + Sync + 'a>,
+        _phantom: PhantomData<fn() -> T>,
+    }
+
+    impl<'a, T: 'a> BasicGenerator<'a, T> {
+        /// Create a new BasicGenerator from a schema and parse function.
+        pub fn new<F: Fn(Value) -> T + Send + Sync + 'a>(schema: Value, f: F) -> Self {
+            BasicGenerator {
+                schema,
+                parse: Box::new(f),
+                _phantom: PhantomData,
+            }
+        }
+
+        /// Get a reference to the schema.
+        pub fn schema(&self) -> &Value {
+            &self.schema
+        }
+
+        /// Parse a raw CBOR value into the generated type.
+        pub fn parse_raw(&self, raw: Value) -> T {
+            (self.parse)(raw)
+        }
+
+        /// Generate a value by sending the schema to the server and parsing the response.
+        ///
+        /// This is a convenience for `self.parse_raw(generate_raw(self.schema()))`.
+        pub fn generate(&self) -> T {
+            self.parse_raw(super::generate_raw(self.schema()))
+        }
+
+        /// Transform the output type by composing a function with the parse.
+        ///
+        /// The resulting BasicGenerator shares the same schema but applies `f`
+        /// after parsing.
+        pub fn map<U: 'a, F: Fn(T) -> U + Send + Sync + 'a>(self, f: F) -> BasicGenerator<'a, U> {
+            let old_parse = self.parse;
+            BasicGenerator {
+                schema: self.schema,
+                parse: Box::new(move |raw| f(old_parse(raw))),
+                _phantom: PhantomData,
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -468,22 +548,29 @@ pub mod labels {
 
 /// The core trait for all generators.
 ///
-/// Generators produce values of type `T` and optionally carry a JSON Schema
-/// that describes the values they generate.
+/// Generators produce values of type `T` and optionally provide a
+/// [`BasicGenerator`] for server-based generation via `as_basic()`.
 pub trait Generate<T>: Send + Sync {
     /// Generate a value.
     fn generate(&self) -> T;
 
-    /// Get the JSON Schema for this generator, if available.
+    /// Return a BasicGenerator for schema-based generation, if possible.
     ///
-    /// Schemas enable composition optimizations where a single request to Hegel
-    /// can generate complex nested structures.
-    fn schema(&self) -> Option<Value>;
+    /// When available, this enables single-request schema-based generation
+    /// and allows combinators to compose schemas.
+    ///
+    /// Returns `None` for generators that cannot be expressed as a schema
+    /// (e.g., after `flat_map` or `filter`).
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
+        None
+    }
 
     /// Transform generated values using a function.
     ///
-    /// The resulting generator has no schema since the transformation
-    /// may invalidate the schema's semantics.
+    /// If this generator is basic, the resulting generator is also basic
+    /// with a composed transform (preserving the schema).
+    /// If this generator is not basic, falls back to a MappedGenerator
+    /// with span tracking.
     fn map<U, F>(self, f: F) -> Mapped<T, U, F, Self>
     where
         Self: Sized,
@@ -491,7 +578,7 @@ pub trait Generate<T>: Send + Sync {
     {
         Mapped {
             source: self,
-            f,
+            f: Arc::new(f),
             _phantom: PhantomData,
         }
     }
@@ -550,7 +637,7 @@ impl<T, G: Generate<T>> Generate<T> for &G {
         (*self).generate()
     }
 
-    fn schema(&self) -> Option<Value> {
-        (*self).schema()
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
+        (*self).as_basic()
     }
 }

@@ -25,7 +25,6 @@
 //! # });
 //! ```
 
-use ciborium::Value;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
@@ -53,10 +52,6 @@ impl RandomsGenerator {
 }
 
 impl Generate<HegelRandom> for RandomsGenerator {
-    fn schema(&self) -> Option<Value> {
-        None
-    }
-
     fn generate(&self) -> HegelRandom {
         if self.use_true_random {
             let seed: u64 = integers().generate();

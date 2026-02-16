@@ -22,15 +22,6 @@ fn test_sampled_from_strings() {
 }
 
 #[test]
-fn test_sampled_from_slice() {
-    hegel::hegel(|| {
-        let options = gen::vecs(gen::integers::<i32>()).generate();
-        let value = gen::sampled_from_slice(&options).generate();
-        assert!(options.contains(&value));
-    });
-}
-
-#[test]
 fn test_optional_can_generate_some() {
     find_any(gen::optional(gen::integers::<i32>()), |v| v.is_some());
 }

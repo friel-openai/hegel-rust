@@ -1,4 +1,4 @@
-use super::{generate_from_schema, Generate};
+use super::{generate_from_schema, BasicGenerator, Generate};
 use crate::cbor_helpers::{cbor_map, map_insert};
 use ciborium::Value;
 
@@ -17,14 +17,8 @@ impl TextGenerator {
         self.max_size = Some(max);
         self
     }
-}
 
-impl Generate<String> for TextGenerator {
-    fn generate(&self) -> String {
-        generate_from_schema(&self.schema().unwrap())
-    }
-
-    fn schema(&self) -> Option<Value> {
+    fn build_schema(&self) -> Value {
         let mut schema = cbor_map! {
             "type" => "string",
             "min_size" => self.min_size as u64
@@ -34,7 +28,19 @@ impl Generate<String> for TextGenerator {
             map_insert(&mut schema, "max_size", Value::from(max as u64));
         }
 
-        Some(schema)
+        schema
+    }
+}
+
+impl Generate<String> for TextGenerator {
+    fn generate(&self) -> String {
+        generate_from_schema(&self.build_schema())
+    }
+
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
+        Some(BasicGenerator::new(self.build_schema(), |raw| {
+            super::deserialize_value(raw)
+        }))
     }
 }
 
@@ -56,19 +62,25 @@ impl RegexGenerator {
         self.fullmatch = true;
         self
     }
+
+    fn build_schema(&self) -> Value {
+        cbor_map! {
+            "type" => "regex",
+            "pattern" => self.pattern.as_str(),
+            "fullmatch" => self.fullmatch
+        }
+    }
 }
 
 impl Generate<String> for RegexGenerator {
     fn generate(&self) -> String {
-        generate_from_schema(&self.schema().unwrap())
+        generate_from_schema(&self.build_schema())
     }
 
-    fn schema(&self) -> Option<Value> {
-        Some(cbor_map! {
-            "type" => "regex",
-            "pattern" => self.pattern.as_str(),
-            "fullmatch" => self.fullmatch
-        })
+    fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
+        Some(BasicGenerator::new(self.build_schema(), |raw| {
+            super::deserialize_value(raw)
+        }))
     }
 }
 

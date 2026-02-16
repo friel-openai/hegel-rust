@@ -1,4 +1,4 @@
-use super::{generate_from_schema, Generate};
+use super::{generate_from_schema, BasicGenerator, Generate};
 use crate::cbor_helpers::{cbor_map, cbor_serialize, map_insert};
 use ciborium::Value;
 use num::{Bounded, Float as NumFloat, Integer as NumInteger};
@@ -24,25 +24,34 @@ impl<T> IntegerGenerator<T> {
     }
 }
 
+impl<T> IntegerGenerator<T>
+where
+    T: serde::Serialize + Bounded + Copy,
+{
+    fn build_schema(&self) -> Value {
+        let min = self.min.unwrap_or_else(T::min_value);
+        let max = self.max.unwrap_or_else(T::max_value);
+
+        cbor_map! {
+            "type" => "integer",
+            "minimum" => cbor_serialize(&min),
+            "maximum" => cbor_serialize(&max)
+        }
+    }
+}
+
 impl<T> Generate<T> for IntegerGenerator<T>
 where
     T: serde::de::DeserializeOwned + serde::Serialize + Bounded + NumInteger + Send + Sync + Copy,
 {
     fn generate(&self) -> T {
-        generate_from_schema(&self.schema().unwrap())
+        generate_from_schema(&self.build_schema())
     }
 
-    fn schema(&self) -> Option<Value> {
-        // Always include bounds - use type's min/max as defaults since Hegel
-        // generates arbitrary precision integers without bounds
-        let min = self.min.unwrap_or_else(T::min_value);
-        let max = self.max.unwrap_or_else(T::max_value);
-
-        Some(cbor_map! {
-            "type" => "integer",
-            "minimum" => cbor_serialize(&min),
-            "maximum" => cbor_serialize(&max)
-        })
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
+        Some(BasicGenerator::new(self.build_schema(), |raw| {
+            super::deserialize_value(raw)
+        }))
     }
 }
 
@@ -126,15 +135,11 @@ impl<T> FloatGenerator<T> {
     }
 }
 
-impl<T> Generate<T> for FloatGenerator<T>
+impl<T> FloatGenerator<T>
 where
-    T: serde::de::DeserializeOwned + serde::Serialize + NumFloat + Send + Sync,
+    T: serde::Serialize + NumFloat,
 {
-    fn generate(&self) -> T {
-        generate_from_schema(&self.schema().unwrap())
-    }
-
-    fn schema(&self) -> Option<Value> {
+    fn build_schema(&self) -> Value {
         let width = (std::mem::size_of::<T>() * 8) as u64;
 
         let mut schema = cbor_map! {
@@ -166,7 +171,22 @@ where
             }
         }
 
-        Some(schema)
+        schema
+    }
+}
+
+impl<T> Generate<T> for FloatGenerator<T>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize + NumFloat + Send + Sync,
+{
+    fn generate(&self) -> T {
+        generate_from_schema(&self.build_schema())
+    }
+
+    fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
+        Some(BasicGenerator::new(self.build_schema(), |raw| {
+            super::deserialize_value(raw)
+        }))
     }
 }
 

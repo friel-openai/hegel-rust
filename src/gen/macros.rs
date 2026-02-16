@@ -86,28 +86,6 @@ macro_rules! derive_generator {
                         $($field_name: self.$field_name.generate(),)*
                     }
                 }
-
-                fn schema(&self) -> Option<ciborium::Value> {
-                    use $crate::gen::Generate;
-
-                    let mut elements = Vec::new();
-
-                    $(
-                        let field_schema = self.$field_name.schema()?;
-                        elements.push(field_schema);
-                    )*
-
-                    Some(ciborium::Value::Map(vec![
-                        (
-                            ciborium::Value::Text("type".to_string()),
-                            ciborium::Value::Text("tuple".to_string()),
-                        ),
-                        (
-                            ciborium::Value::Text("elements".to_string()),
-                            ciborium::Value::Array(elements),
-                        ),
-                    ]))
-                }
             }
         }
     };

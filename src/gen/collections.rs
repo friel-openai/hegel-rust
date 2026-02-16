@@ -1,17 +1,32 @@
-use super::{generate_from_schema, group, integers, labels, Collection, Generate};
+use super::{group, integers, labels, BasicGenerator, Collection, Generate};
 use crate::cbor_helpers::{cbor_map, map_insert};
 use ciborium::Value;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::marker::PhantomData;
 
-pub struct VecGenerator<G> {
+/// Extract an array from a Value, handling both plain Arrays and CBOR Tag(258, Array)
+/// which is the standard CBOR tag for sets.
+fn extract_array(raw: Value) -> Vec<Value> {
+    match raw {
+        Value::Array(arr) => arr,
+        Value::Tag(258, inner) => match *inner {
+            Value::Array(arr) => arr,
+            other => panic!("Expected array inside set tag, got {:?}", other),
+        },
+        other => panic!("Expected array or tagged set, got {:?}", other),
+    }
+}
+
+pub struct VecGenerator<G, T> {
     pub(crate) elements: G,
     pub(crate) min_size: usize,
     pub(crate) max_size: Option<usize>,
     pub(crate) unique: bool,
+    pub(crate) _phantom: PhantomData<fn(T)>,
 }
 
-impl<G> VecGenerator<G> {
+impl<G, T> VecGenerator<G, T> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -28,15 +43,13 @@ impl<G> VecGenerator<G> {
     }
 }
 
-impl<T, G> Generate<Vec<T>> for VecGenerator<G>
+impl<T, G> Generate<Vec<T>> for VecGenerator<G, T>
 where
     G: Generate<T>,
-    T: serde::de::DeserializeOwned,
 {
     fn generate(&self) -> Vec<T> {
-        if let Some(schema) = self.schema() {
-            // Use composed schema for single round-trip
-            generate_from_schema(&schema)
+        if let Some(basic) = self.as_basic() {
+            basic.generate()
         } else {
             // Compositional fallback: use server-managed collection sizing
             group(labels::LIST, || {
@@ -51,14 +64,15 @@ where
         }
     }
 
-    fn schema(&self) -> Option<Value> {
-        let element_schema = self.elements.schema()?;
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<T>>> {
+        let elem_basic = self.elements.as_basic()?;
+        let elem_schema = elem_basic.schema().clone();
 
         let schema_type = if self.unique { "set" } else { "list" };
 
         let mut schema = cbor_map! {
             "type" => schema_type,
-            "elements" => element_schema,
+            "elements" => elem_schema,
             "min_size" => self.min_size as u64
         };
 
@@ -66,27 +80,32 @@ where
             map_insert(&mut schema, "max_size", Value::from(max as u64));
         }
 
-        Some(schema)
+        Some(BasicGenerator::new(schema, move |raw| {
+            let arr = extract_array(raw);
+            arr.into_iter().map(|v| elem_basic.parse_raw(v)).collect()
+        }))
     }
 }
 
 /// Generate vectors (lists).
-pub fn vecs<T, G: Generate<T>>(elements: G) -> VecGenerator<G> {
+pub fn vecs<T, G: Generate<T>>(elements: G) -> VecGenerator<G, T> {
     VecGenerator {
         elements,
         min_size: 0,
         max_size: None,
         unique: false,
+        _phantom: PhantomData,
     }
 }
 
-pub struct HashSetGenerator<G> {
+pub struct HashSetGenerator<G, T> {
     elements: G,
     min_size: usize,
     max_size: Option<usize>,
+    _phantom: PhantomData<fn(T)>,
 }
 
-impl<G> HashSetGenerator<G> {
+impl<G, T> HashSetGenerator<G, T> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -98,23 +117,14 @@ impl<G> HashSetGenerator<G> {
     }
 }
 
-impl<T, G> Generate<HashSet<T>> for HashSetGenerator<G>
+impl<T, G> Generate<HashSet<T>> for HashSetGenerator<G, T>
 where
     G: Generate<T>,
-    T: serde::de::DeserializeOwned + Eq + Hash,
+    T: Eq + Hash,
 {
     fn generate(&self) -> HashSet<T> {
-        // Generate as unique vec, convert to set
-        let vec_gen = VecGenerator {
-            elements: &self.elements,
-            min_size: self.min_size,
-            max_size: self.max_size,
-            unique: true,
-        };
-
-        if let Some(schema) = vec_gen.schema() {
-            let vec: Vec<T> = generate_from_schema(&schema);
-            vec.into_iter().collect()
+        if let Some(basic) = self.as_basic() {
+            basic.generate()
         } else {
             // Compositional fallback
             group(labels::SET, || {
@@ -135,12 +145,13 @@ where
         }
     }
 
-    fn schema(&self) -> Option<Value> {
-        let element_schema = self.elements.schema()?;
+    fn as_basic(&self) -> Option<BasicGenerator<'_, HashSet<T>>> {
+        let elem_basic = self.elements.as_basic()?;
+        let elem_schema = elem_basic.schema().clone();
 
         let mut schema = cbor_map! {
             "type" => "set",
-            "elements" => element_schema,
+            "elements" => elem_schema,
             "min_size" => self.min_size as u64
         };
 
@@ -148,26 +159,31 @@ where
             map_insert(&mut schema, "max_size", Value::from(max as u64));
         }
 
-        Some(schema)
+        Some(BasicGenerator::new(schema, move |raw| {
+            let arr = extract_array(raw);
+            arr.into_iter().map(|v| elem_basic.parse_raw(v)).collect()
+        }))
     }
 }
 
-pub fn hashsets<T, G: Generate<T>>(elements: G) -> HashSetGenerator<G> {
+pub fn hashsets<T, G: Generate<T>>(elements: G) -> HashSetGenerator<G, T> {
     HashSetGenerator {
         elements,
         min_size: 0,
         max_size: None,
+        _phantom: PhantomData,
     }
 }
 
-pub struct HashMapGenerator<K, V> {
+pub struct HashMapGenerator<K, V, KT, VT> {
     keys: K,
     values: V,
     min_size: usize,
     max_size: Option<usize>,
+    _phantom: PhantomData<fn(KT, VT)>,
 }
 
-impl<K, V> HashMapGenerator<K, V> {
+impl<K, V, KT, VT> HashMapGenerator<K, V, KT, VT> {
     pub fn with_min_size(mut self, min: usize) -> Self {
         self.min_size = min;
         self
@@ -179,18 +195,15 @@ impl<K, V> HashMapGenerator<K, V> {
     }
 }
 
-impl<K, V, KT, VT> Generate<HashMap<KT, VT>> for HashMapGenerator<K, V>
+impl<K, V, KT, VT> Generate<HashMap<KT, VT>> for HashMapGenerator<K, V, KT, VT>
 where
     K: Generate<KT>,
     V: Generate<VT>,
-    KT: serde::de::DeserializeOwned + Eq + std::hash::Hash,
-    VT: serde::de::DeserializeOwned,
+    KT: Eq + std::hash::Hash,
 {
     fn generate(&self) -> HashMap<KT, VT> {
-        if let Some(schema) = self.schema() {
-            // Wire format: [[key, value], ...]
-            let pairs: Vec<(KT, VT)> = generate_from_schema(&schema);
-            pairs.into_iter().collect()
+        if let Some(basic) = self.as_basic() {
+            basic.generate()
         } else {
             // Compositional fallback
             group(labels::MAP, || {
@@ -216,14 +229,17 @@ where
         }
     }
 
-    fn schema(&self) -> Option<Value> {
-        let key_schema = self.keys.schema()?;
-        let value_schema = self.values.schema()?;
+    fn as_basic(&self) -> Option<BasicGenerator<'_, HashMap<KT, VT>>> {
+        let key_basic = self.keys.as_basic()?;
+        let val_basic = self.values.as_basic()?;
+
+        let key_schema = key_basic.schema().clone();
+        let val_schema = val_basic.schema().clone();
 
         let mut schema = cbor_map! {
             "type" => "dict",
             "keys" => key_schema,
-            "values" => value_schema,
+            "values" => val_schema,
             "min_size" => self.min_size as u64
         };
 
@@ -231,7 +247,29 @@ where
             map_insert(&mut schema, "max_size", Value::from(max as u64));
         }
 
-        Some(schema)
+        Some(BasicGenerator::new(schema, move |raw| {
+            // Wire format: [[key, value], ...]
+            let pairs = match raw {
+                Value::Array(arr) => arr,
+                _ => panic!("Expected array of pairs from dict schema, got {:?}", raw),
+            };
+
+            let mut map = HashMap::new();
+            for pair in pairs {
+                let mut pair_arr = match pair {
+                    Value::Array(arr) => arr,
+                    _ => panic!("Expected pair array, got {:?}", pair),
+                };
+                let raw_value = pair_arr.pop().unwrap();
+                let raw_key = pair_arr.pop().unwrap();
+
+                let key = key_basic.parse_raw(raw_key);
+                let value = val_basic.parse_raw(raw_value);
+
+                map.insert(key, value);
+            }
+            map
+        }))
     }
 }
 
@@ -249,11 +287,15 @@ where
 /// // Integer keys
 /// let int_keyed: HashMap<i32, String> = hashmaps(integers(), text()).generate();
 /// ```
-pub fn hashmaps<K, V>(keys: K, values: V) -> HashMapGenerator<K, V> {
+pub fn hashmaps<KT, VT, K: Generate<KT>, V: Generate<VT>>(
+    keys: K,
+    values: V,
+) -> HashMapGenerator<K, V, KT, VT> {
     HashMapGenerator {
         keys,
         values,
         min_size: 0,
         max_size: None,
+        _phantom: PhantomData,
     }
 }

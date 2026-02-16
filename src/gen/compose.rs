@@ -1,16 +1,16 @@
 use super::Generate;
-use ciborium::Value;
+use std::marker::PhantomData;
 
 /// A generator created from imperative code that calls `.generate()` on other generators.
 ///
 /// Use the `compose!` macro to create instances of this type.
 ///
 /// `ComposedGenerator` wraps a closure that produces values by composing
-/// multiple generator calls together. It has no schema (returns `None`),
+/// multiple generator calls together. It never has a basic form (returns `None` from `as_basic()`),
 /// since the composition is imperative and cannot be described as a single schema.
 pub struct ComposedGenerator<T, F> {
     f: F,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: PhantomData<fn() -> T>,
 }
 
 impl<T, F> ComposedGenerator<T, F>
@@ -24,7 +24,7 @@ where
     pub fn new(f: F) -> Self {
         ComposedGenerator {
             f,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         }
     }
 }
@@ -36,15 +36,7 @@ where
     fn generate(&self) -> T {
         (self.f)()
     }
-
-    fn schema(&self) -> Option<Value> {
-        None
-    }
 }
-
-// Safety: ComposedGenerator is Send+Sync if F is Send+Sync
-unsafe impl<T, F: Send> Send for ComposedGenerator<T, F> {}
-unsafe impl<T, F: Sync> Sync for ComposedGenerator<T, F> {}
 
 /// Compile-time FNV-1a hash of a byte slice, producing a u64 label.
 pub const fn fnv1a_hash(bytes: &[u8]) -> u64 {

@@ -276,8 +276,6 @@ where
     /// - Any test case fails (after shrinking)
     /// - Socket communication errors
     pub fn run(self) {
-        init_panic_hook();
-
         // Create temp directory with socket path
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let socket_path = temp_dir.path().join("hegel.sock");
@@ -298,7 +296,13 @@ where
             eprintln!("Starting hegeld: {:?}", cmd);
         }
 
-        let mut child = cmd.spawn().expect("Failed to spawn hegel");
+        // Nonsense warning: string allocation is insignificant next to spawning a process
+        #[allow(clippy::expect_fun_call)]
+        let mut child = cmd
+            .spawn()
+            .expect(format!("Failed to spawn hegel at path {}", hegel_path).as_str());
+
+        init_panic_hook();
 
         // Wait for hegeld to create the socket and start listening
         let mut attempts = 0;

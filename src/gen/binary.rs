@@ -1,4 +1,4 @@
-use super::{generate_from_schema, Generate};
+use super::{BasicGenerator, Generate};
 use crate::cbor_helpers::{cbor_map, map_insert};
 use ciborium::Value;
 
@@ -104,13 +104,8 @@ impl BinaryGenerator {
     }
 }
 
-impl Generate<Vec<u8>> for BinaryGenerator {
-    fn generate(&self) -> Vec<u8> {
-        let b64: String = generate_from_schema(&self.schema().unwrap());
-        base64_decode(&b64).expect("invalid base64")
-    }
-
-    fn schema(&self) -> Option<Value> {
+impl BinaryGenerator {
+    fn build_schema(&self) -> Value {
         let mut schema = cbor_map! {
             "type" => "binary",
             "min_size" => self.min_size as u64
@@ -120,7 +115,25 @@ impl Generate<Vec<u8>> for BinaryGenerator {
             map_insert(&mut schema, "max_size", Value::from(max as u64));
         }
 
-        Some(schema)
+        schema
+    }
+}
+
+fn parse_binary(raw: Value) -> Vec<u8> {
+    let b64 = match raw {
+        Value::Text(s) => s,
+        _ => panic!("Expected text (base64) from binary schema, got {:?}", raw),
+    };
+    base64_decode(&b64).expect("invalid base64")
+}
+
+impl Generate<Vec<u8>> for BinaryGenerator {
+    fn generate(&self) -> Vec<u8> {
+        parse_binary(super::generate_raw(&self.build_schema()))
+    }
+
+    fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<u8>>> {
+        Some(BasicGenerator::new(self.build_schema(), parse_binary))
     }
 }
 
