@@ -24,7 +24,7 @@ pub trait DefaultGenerator: Sized {
 /// # Example
 ///
 /// ```no_run
-/// use hegel::gen::{self, Generate};
+/// use hegel::gen;
 /// use hegel::Generate;
 ///
 /// #[derive(Generate, Debug)]
