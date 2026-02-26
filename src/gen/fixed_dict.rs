@@ -1,4 +1,4 @@
-use super::{labels, BasicGenerator, BoxedGenerator, TestCaseData, Generate};
+use super::{labels, BasicGenerator, BoxedGenerator, Generate, TestCaseData};
 use crate::cbor_helpers::cbor_map;
 use ciborium::Value;
 use std::marker::PhantomData;

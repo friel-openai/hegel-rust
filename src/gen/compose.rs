@@ -1,4 +1,4 @@
-use super::{TestCaseData, Generate};
+use super::{Generate, TestCaseData};
 use std::marker::PhantomData;
 
 /// A generator created from imperative code that draws from other generators.

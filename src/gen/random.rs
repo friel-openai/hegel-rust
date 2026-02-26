@@ -28,7 +28,7 @@
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
-use super::{binary, test_case_data, integers, TestCaseData, Generate};
+use super::{binary, integers, test_case_data, Generate, TestCaseData};
 
 /// Generator for [`HegelRandom`] instances.
 ///

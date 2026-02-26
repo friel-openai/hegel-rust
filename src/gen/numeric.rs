@@ -1,4 +1,4 @@
-use super::{BasicGenerator, TestCaseData, Generate};
+use super::{BasicGenerator, Generate, TestCaseData};
 use crate::cbor_helpers::{cbor_map, cbor_serialize, map_insert};
 use ciborium::Value;
 use num::{Bounded, Float as NumFloat, Integer as NumInteger};
