@@ -1,3 +1,29 @@
+# Hegel SDK for Rust
+# This justfile provides the standard build recipes.
+
+# Install dependencies and the hegel binary.
+# If HEGEL_BINARY is set, symlinks it into ~/.local/bin instead of installing from git.
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${HEGEL_BINARY:-}" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HEGEL_BINARY" "$HOME/.local/bin/hegel"
+    else
+        uv tool install "hegel @ git+ssh://git@github.com/antithesishq/hegel.git"
+    fi
+
+check: lint docs test test-all-features
+
+docs:
+    cargo clean --doc && cargo doc --open --all-features --no-deps
+
+test:
+    RUST_BACKTRACE=1 cargo test
+
+test-all-features:
+    RUST_BACKTRACE=1 cargo test --all-features
+
 format:
     cargo fmt
     # also run format-nix if we have nix installed
@@ -13,27 +39,18 @@ check-format-nix:
     nix run nixpkgs#nixfmt -- --check flake.nix
 
 lint:
+    cargo fmt --check
     cargo clippy --all-features --tests -- -D warnings
-
-check-test:
-    cargo test --all-features
-
-check-conformance:
-    pytest tests/conformance/test_conformance.py --durations=20 --durations-min=1.0
-
-check-coverage:
-    # requires:
-    # * cargo install cargo-llvm-cov
-    # * rustup component add llvm-tools-preview
-    cargo llvm-cov --all-features --fail-under-lines 30 --show-missing-lines
-
-docs:
-    cargo clean --doc && cargo doc --open --all-features --no-deps
-
-check-docs:
     RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
 
+coverage:
+    # requires cargo-llvm-cov and llvm-tools-preview
+    RUST_BACKTRACE=1 cargo llvm-cov --all-features --fail-under-lines 30 --show-missing-lines
 
-# aliases for local developer experience. CI and builds should use the longer names.
-alias test := check-test
-check: check-format lint check-test check-docs
+build-conformance:
+    cargo build --release --manifest-path tests/conformance/rust/Cargo.toml
+
+conformance: build-conformance
+    uv run --with "hegel @ git+ssh://git@github.com/antithesishq/hegel.git" \
+        --with pytest --with pytest-subtests --with hypothesis \
+        pytest tests/conformance/test_conformance.py --durations=20 --durations-min=1.0
