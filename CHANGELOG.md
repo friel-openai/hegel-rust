@@ -1,10 +1,5 @@
 # Changelog
 
-## 0.1.5 - 2026-02-26
-
-Rename the `gen` module to `generators`, avoiding a conflict with rust edition 2024, which made `gen` a reserved keyword.
-
-
 ## 0.1.4 - 2026-02-26
 
 Refactor internals for better encapsulation of per-test-case state.

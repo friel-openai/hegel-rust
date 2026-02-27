@@ -1,6 +1,10 @@
-# Hegel Rust SDK
+# hegel-rust
 
-Hegel rust SDK.
+A Rust SDK for [Hegel](https://github.com/antithesishq/hegel-core) — universal
+property-based testing powered by [Hypothesis](https://hypothesis.works/).
+
+Hegel generates random inputs for your tests, finds failures, and automatically
+shrinks them to minimal counterexamples.
 
 ## Installation
 
@@ -11,74 +15,37 @@ Add to your `Cargo.toml`:
 hegel = { git = "ssh://git@github.com/antithesishq/hegel-rust" }
 ```
 
-During build, `hegel-rust`:
+The SDK requires the `hegel` CLI on your PATH:
 
-* Looks for `hegel` on PATH
-* Otherwise, installs hegel with uv
-   * Looks for `uv` on PATH
-   * Otherwise, installs uv from installer
-
-`hegel-rust` build artifacts are stored in cargo's `OUT_DIR / hegel`.
-
-### Nix
-
-To use hegel-rust in Nix:
-
-```nix
-{
-  description = "sandbox";
-
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    hegel-rust.url = "git+ssh://git@github.com/antithesishq/hegel-rust";
-  };
-
-  outputs = { nixpkgs, hegel-rust, ... }:
-    let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-    in
-    {
-      packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
-        pname = "rust-hegel-sandbox";
-        version = "0.1.0";
-        src = ./.;
-        cargoLock.lockFile = ./Cargo.lock;
-
-        # hegel binary on PATH so build.rs finds it
-        nativeBuildInputs = [
-          hegel-rust.packages.${system}.default
-        ];
-      };
-
-      devShells.${system}.default = pkgs.mkShell {
-        buildInputs = [
-          pkgs.cargo
-          pkgs.rustc
-          hegel-rust.packages.${system}.default
-        ];
-      };
-    };
-}
+```bash
+pip install "hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git"
 ```
 
 ## Quick Start
 
 ```rust
-use hegel::gen::{self, Generate};
+use hegel::generators::{self, Generate};
 
 #[test]
 fn test_addition_commutative() {
     hegel::hegel(|| {
-        let x = gen::integers::<i32>().generate();
-        let y = gen::integers::<i32>().generate();
+        let x = generators::integers::<i32>().generate();
+        let y = generators::integers::<i32>().generate();
         assert_eq!(x + y, y + x);
     });
 }
 ```
 
-Run with `cargo test`.
+Run with `cargo test` as normal. Hegel generates 100 random input pairs and
+reports the minimal counterexample if it finds one.
 
-## Documentation
+For a full walkthrough, see [docs/getting-started.md](docs/getting-started.md).
 
-`just docs` to build and open the docs locally.
+## Development
+
+```bash
+just setup       # Install dependencies (hegel binary)
+just check       # Full CI: lint + docs + tests
+just test        # Run tests only
+just conformance # Run cross-language conformance tests
+```
