@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7 - 2026-02-27
+
+Add the `#[hegel::test]` macro as an ergonomic way to declare a hegel test.
+
+
 ## 0.1.6 - 2026-02-27
 
 Minor code style cleanup: elide unnecessary named lifetimes.
