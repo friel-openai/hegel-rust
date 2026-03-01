@@ -209,10 +209,12 @@
 //! Set verbosity to [`Verbosity::Debug`] to enable debug logging of requests/responses.
 
 pub(crate) mod cbor_helpers;
+pub mod control;
 pub mod generators;
 pub(crate) mod protocol;
 pub(crate) mod runner;
 
+pub use control::{assume, currently_in_test_context, note};
 pub use generators::draw;
 pub use generators::Generate;
 
@@ -226,15 +228,3 @@ pub use paste;
 pub use hegel_derive::test;
 pub use hegel_derive::Generate;
 pub use runner::{hegel, Hegel, Verbosity};
-
-/// Note a message which will be displayed with the reported failing test case.
-pub fn note(message: &str) {
-    generators::note(message)
-}
-
-/// Assume a condition is true. If false, reject the current test input.
-pub fn assume(condition: bool) {
-    if !condition {
-        panic!("{}", runner::ASSUME_FAIL_STRING);
-    }
-}

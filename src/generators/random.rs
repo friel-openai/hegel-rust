@@ -110,23 +110,12 @@ pub enum HegelRandom {
     True(Box<StdRng>),
 }
 
-// Dummy Deserialize impl to satisfy trait bounds when composing with vecs(), etc.
-// This is never called at runtime since randoms().schema() returns None,
-// causing collection generators to use compositional fallback.
-impl<'de> serde::Deserialize<'de> for HegelRandom {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        unreachable!("HegelRandom::deserialize should never be called")
-    }
-}
 
 impl RngCore for HegelRandom {
     fn next_u32(&mut self) -> u32 {
         match self {
             Self::Artificial => {
-                let data = test_case_data();
+                let data = test_case_data().expect("HegelRandom used outside of a Hegel test");
                 integers().do_draw(data)
             }
             Self::True(rng) => rng.next_u32(),
@@ -136,7 +125,7 @@ impl RngCore for HegelRandom {
     fn next_u64(&mut self) -> u64 {
         match self {
             Self::Artificial => {
-                let data = test_case_data();
+                let data = test_case_data().expect("HegelRandom used outside of a Hegel test");
                 integers().do_draw(data)
             }
             Self::True(rng) => rng.next_u64(),
@@ -146,7 +135,7 @@ impl RngCore for HegelRandom {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         match self {
             Self::Artificial => {
-                let data = test_case_data();
+                let data = test_case_data().expect("HegelRandom used outside of a Hegel test");
                 let bytes: Vec<u8> = binary()
                     .with_min_size(dest.len())
                     .with_max_size(dest.len())

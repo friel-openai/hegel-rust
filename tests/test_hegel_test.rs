@@ -22,6 +22,18 @@ fn test_draw_outside_test_panics() {
 }
 
 #[test]
+#[should_panic(expected = "assume() cannot be called outside of a Hegel test")]
+fn test_assume_outside_test_panics() {
+    hegel::assume(true);
+}
+
+#[test]
+#[should_panic(expected = "note() cannot be called outside of a Hegel test")]
+fn test_note_outside_test_panics() {
+    hegel::note("hello");
+}
+
+#[test]
 fn test_params_compile_error() {
     let code = r#"
 use hegel::generators;

@@ -1,4 +1,5 @@
-use crate::generators::{TestCaseData, TEST_CASE_DATA};
+use crate::control::{clear_test_case_data, set_test_case_data, ASSUME_FAIL_STRING};
+use crate::generators::TestCaseData;
 use crate::protocol::{Channel, Connection, HANDSHAKE_STRING};
 use ciborium::Value;
 
@@ -518,7 +519,7 @@ fn run_test_case<F: FnMut()>(
     // Note: we pass the channel directly (not cloned) so generators and mark_complete
     // share the same message ID sequence.
     let data = TestCaseData::new(Arc::clone(connection), test_channel, verbosity, is_final);
-    TEST_CASE_DATA.with(|c| c.set(&data as *const TestCaseData));
+    set_test_case_data(&data);
 
     // Run test in catch_unwind
     let result = catch_unwind(AssertUnwindSafe(test_fn));
@@ -594,8 +595,7 @@ fn run_test_case<F: FnMut()>(
         let _ = data.channel().close();
     }
 
-    // Clear thread-local pointer
-    TEST_CASE_DATA.with(|c| c.set(std::ptr::null()));
+    clear_test_case_data();
 }
 
 /// Extract a message from a panic payload.

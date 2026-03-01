@@ -36,9 +36,9 @@ impl Channel {
         let message_id = self.next_message_id.fetch_add(1, Ordering::SeqCst);
         let packet = Packet {
             channel: self.channel_id,
-            message_id: message_id,
+            message_id,
             is_reply: false,
-            payload: payload,
+            payload,
         };
         self.connection.send_packet(&packet)?;
         Ok(message_id)
@@ -48,9 +48,9 @@ impl Channel {
     pub fn write_reply(&self, message_id: u32, payload: Vec<u8>) -> std::io::Result<()> {
         let packet = Packet {
             channel: self.channel_id,
-            message_id: message_id,
+            message_id,
             is_reply: true,
-            payload: payload,
+            payload,
         };
         self.connection.send_packet(&packet)
     }

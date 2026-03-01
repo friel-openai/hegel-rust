@@ -82,12 +82,16 @@ macro_rules! compose {
     (|$draw:ident| { $($body:tt)* }) => {{
         const LABEL: u64 = $crate::generators::fnv1a_hash(stringify!($($body)*).as_bytes());
         $crate::generators::ComposedGenerator::new(move || {
-            let __data = $crate::generators::test_case_data();
+            let __data = $crate::generators::test_case_data().expect(
+                "compose!() cannot be called outside of a Hegel test."
+            );
             let __was_composite = __data.in_composite();
             __data.set_in_composite(true);
             let __result = __data.span_group(LABEL, || {
                 fn $draw<T>(gen: &impl $crate::generators::Generate<T>) -> T {
-                    gen.do_draw($crate::generators::test_case_data())
+                    gen.do_draw($crate::generators::test_case_data().expect(
+                        "compose!() cannot be called outside of a Hegel test."
+                    ))
                 }
                 $($body)*
             });

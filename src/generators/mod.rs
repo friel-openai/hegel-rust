@@ -616,7 +616,7 @@ impl<T, G: Generate<T>> Generate<T> for &G {
 /// # });
 /// ```
 pub fn draw<T: std::fmt::Debug>(gen: &impl Generate<T>) -> T {
-    let data = test_case_data();
+    let data = test_case_data().expect("draw() cannot be called outside of a Hegel test.");
     assert!(
         !data.in_composite(),
         "cannot call draw() inside compose!(). Use the draw parameter instead."
