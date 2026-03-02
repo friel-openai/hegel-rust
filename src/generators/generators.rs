@@ -59,7 +59,7 @@ impl<'a, T: 'a> BasicGenerator<'a, T> {
 /// Generators produce values of type `T` and optionally provide a
 /// [`BasicGenerator`] for server-based generation via `as_basic()`.
 pub trait Generate<T>: Send + Sync {
-    /// Generate a value. This is an internal method — use [`draw()`] instead.
+    /// Generate a value. This is an internal method — use [`crate::draw()`] instead.
     fn do_draw(&self, data: &TestCaseData) -> T;
 
     /// Return a BasicGenerator for schema-based generation, if possible.
