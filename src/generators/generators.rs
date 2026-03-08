@@ -14,7 +14,6 @@ pub struct BasicGenerator<'a, T> {
 }
 
 impl<'a, T: 'a> BasicGenerator<'a, T> {
-    /// Create a new BasicGenerator from a schema and parse function.
     pub fn new<F: Fn(Value) -> T + Send + Sync + 'a>(schema: Value, f: F) -> Self {
         BasicGenerator {
             schema,
@@ -23,12 +22,10 @@ impl<'a, T: 'a> BasicGenerator<'a, T> {
         }
     }
 
-    /// Get a reference to the schema.
     pub fn schema(&self) -> &Value {
         &self.schema
     }
 
-    /// Parse a raw CBOR value into the generated type.
     pub fn parse_raw(&self, raw: Value) -> T {
         (self.parse)(raw)
     }
@@ -59,7 +56,6 @@ impl<'a, T: 'a> BasicGenerator<'a, T> {
 /// Generators produce values of type `T` and optionally provide a
 /// [`BasicGenerator`] for server-based generation via `as_basic()`.
 pub trait Generate<T>: Send + Sync {
-    /// Generate a value. This is an internal method — use [`crate::draw()`] instead.
     fn do_draw(&self, data: &TestCaseData) -> T;
 
     /// Return a BasicGenerator for schema-based generation, if possible.
@@ -108,7 +104,6 @@ pub trait Generate<T>: Send + Sync {
         }
     }
 
-    /// Filter generated values using a predicate.
     fn filter<F>(self, predicate: F) -> Filtered<T, F, Self>
     where
         Self: Sized,
@@ -139,7 +134,6 @@ pub trait Generate<T>: Send + Sync {
     }
 }
 
-// Implement Generate for references to generators
 impl<T, G: Generate<T>> Generate<T> for &G {
     fn do_draw(&self, data: &TestCaseData) -> T {
         (*self).do_draw(data)
@@ -165,7 +159,10 @@ where
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            data.span_group(labels::MAPPED, || (self.f)(self.source.do_draw(data)))
+            data.start_span(labels::MAPPED);
+            let result = (self.f)(self.source.do_draw(data));
+            data.stop_span(false);
+            result
         }
     }
 
@@ -189,11 +186,12 @@ where
     F: Fn(T) -> G2 + Send + Sync,
 {
     fn do_draw(&self, data: &TestCaseData) -> U {
-        data.span_group(labels::FLAT_MAP, || {
-            let intermediate = self.source.do_draw(data);
-            let next_gen = (self.f)(intermediate);
-            next_gen.do_draw(data)
-        })
+        data.start_span(labels::FLAT_MAP);
+        let intermediate = self.source.do_draw(data);
+        let next_gen = (self.f)(intermediate);
+        let result = next_gen.do_draw(data);
+        data.stop_span(false);
+        result
     }
 }
 
@@ -210,16 +208,13 @@ where
 {
     fn do_draw(&self, data: &TestCaseData) -> T {
         for _ in 0..3 {
-            if let Some(value) = data.discardable_span_group(labels::FILTER, || {
-                let value = self.source.do_draw(data);
-                if (self.predicate)(&value) {
-                    Some(value)
-                } else {
-                    None
-                }
-            }) {
+            data.start_span(labels::FILTER);
+            let value = self.source.do_draw(data);
+            if (self.predicate)(&value) {
+                data.stop_span(false);
                 return value;
             }
+            data.stop_span(true);
         }
         crate::assume(false);
         unreachable!()

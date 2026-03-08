@@ -361,16 +361,17 @@ pub(crate) fn derive_enum_generate(input: &DeriveInput, data: &syn::DataEnum) ->
                     if let Some(basic) = self.as_basic() {
                         basic.parse_raw(__data.generate_raw(basic.schema()))
                     } else {
-                        __data.span_group(hegel::generators::labels::ENUM_VARIANT, || {
-                            let selected: String = __data.generate_from_schema(
-                                &#sampled_from_schema
-                            );
+                        __data.start_span(hegel::generators::labels::ENUM_VARIANT);
+                        let selected: String = __data.generate_from_schema(
+                            &#sampled_from_schema
+                        );
 
-                            match selected.as_str() {
-                                #(#generate_match_arms,)*
-                                _ => unreachable!("Unknown variant: {}", selected),
-                            }
-                        })
+                        let __result = match selected.as_str() {
+                            #(#generate_match_arms,)*
+                            _ => unreachable!("Unknown variant: {}", selected),
+                        };
+                        __data.stop_span(false);
+                        __result
                     }
                 }
 

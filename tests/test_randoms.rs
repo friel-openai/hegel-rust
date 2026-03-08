@@ -29,7 +29,7 @@ fn test_randoms_shuffle_preserves_elements() {
 #[hegel::test]
 fn test_randoms_choose() {
     let mut rng = hegel::draw(&randoms());
-    let items: Vec<i32> = hegel::draw(&vecs(integers()).with_min_size(1));
+    let items: Vec<i32> = hegel::draw(&vecs(integers()).min_size(1));
     let picked = items.choose(&mut rng).unwrap();
     assert!(items.contains(picked));
 }

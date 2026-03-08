@@ -91,7 +91,7 @@ pub fn assume(condition: bool) {
 /// ```
 pub fn note(message: &str) {
     let data = test_case_data().expect("note() cannot be called outside of a Hegel test.");
-    if data.is_last_run() {
+    if data.is_last_run {
         eprintln!("{}", message);
     }
 }
@@ -115,7 +115,7 @@ pub fn note(message: &str) {
 pub fn draw<T: std::fmt::Debug>(gen: &impl Generate<T>) -> T {
     let data = test_case_data().expect("draw() cannot be called outside of a Hegel test.");
     assert!(
-        !data.in_composite(),
+        !data.in_composite.get(),
         "cannot call draw() inside compose!(). Use the draw parameter instead."
     );
     let value = gen.do_draw(data);

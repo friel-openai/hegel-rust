@@ -10,10 +10,7 @@ use std::hash::Hash;
 ///
 /// This is used by derive macros to automatically generate values for fields.
 pub trait DefaultGenerator: Sized {
-    /// The generator type for this type.
     type Generator: super::Generate<Self>;
-
-    /// Get the default generator for this type.
     fn default_generator() -> Self::Generator;
 }
 
@@ -40,7 +37,7 @@ pub trait DefaultGenerator: Sized {
 ///
 /// // Customize field generators
 /// let person: Person = hegel::draw(&generators::from_type::<Person>()
-///     .with_age(generators::integers().with_min(0).with_max(120)));
+///     .with_age(generators::integers().min_value(0).max_value(120)));
 /// # });
 /// ```
 pub fn from_type<T: DefaultGenerator>() -> T::Generator {
@@ -210,13 +207,13 @@ where
 /// # Example
 ///
 /// ```ignore
-/// // In your production crate (no hegel dependency needed):
+/// // In your crate:
 /// pub struct Person {
 ///     pub name: String,
 ///     pub age: u32,
 /// }
 ///
-/// // In your test crate:
+/// // In your tests:
 /// use hegel::derive_generator;
 /// use hegel::generators::{self, Generate};
 /// use production_crate::Person;
@@ -226,10 +223,10 @@ where
 ///     age: u32,
 /// });
 ///
-/// // Use from_type to get a generator:
+/// // from_type now supports Person:
 /// let gen = generators::from_type::<Person>()
 ///     .with_name(generators::from_regex("[A-Z][a-z]+"))
-///     .with_age(generators::integers::<u32>().with_min(0).with_max(120));
+///     .with_age(generators::integers::<u32>().min_value(0).max_value(120));
 ///
 /// let person: Person = hegel::draw(&gen);
 /// ```

@@ -18,9 +18,10 @@ macro_rules! impl_tuple {
                 if let Some(basic) = self.as_basic() {
                     basic.do_draw(data)
                 } else {
-                    data.span_group(labels::TUPLE, || {
-                        ($(self.$field.do_draw(data),)+)
-                    })
+                    data.start_span(labels::TUPLE);
+                    let result = ($(self.$field.do_draw(data),)+);
+                    data.stop_span(false);
+                    result
                 }
             }
 

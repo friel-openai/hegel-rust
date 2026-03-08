@@ -71,10 +71,8 @@ impl Channel {
         }
     }
 
-    /// Wait for an incoming request.
     pub fn receive_request(&self) -> std::io::Result<(u32, Vec<u8>)> {
         loop {
-            // Check if we already have a request
             {
                 let mut requests = self.requests.lock().unwrap();
                 if let Some(packet) = requests.pop_front() {
@@ -82,12 +80,10 @@ impl Channel {
                 }
             }
 
-            // Process one message from the connection
             self.process_one_message()?;
         }
     }
 
-    /// Process one incoming message and route it appropriately.
     fn process_one_message(&self) -> std::io::Result<()> {
         let packet = self
             .connection
@@ -104,7 +100,6 @@ impl Channel {
         Ok(())
     }
 
-    /// Close this channel by sending a close packet to the remote side.
     pub fn close(&self) -> std::io::Result<()> {
         let packet = Packet {
             channel: self.channel_id,

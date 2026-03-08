@@ -15,13 +15,13 @@ pub struct VecGenerator<G, T> {
 }
 
 impl<G, T> VecGenerator<G, T> {
-    pub fn with_min_size(mut self, min: usize) -> Self {
-        self.min_size = min;
+    pub fn min_size(mut self, min_size: usize) -> Self {
+        self.min_size = min_size;
         self
     }
 
-    pub fn with_max_size(mut self, max: usize) -> Self {
-        self.max_size = Some(max);
+    pub fn max_size(mut self, max_size: usize) -> Self {
+        self.max_size = Some(max_size);
         self
     }
 
@@ -39,27 +39,25 @@ where
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Compositional fallback: use server-managed collection sizing
-            data.span_group(labels::LIST, || {
-                let mut collection =
-                    Collection::new(data, "composite_list", self.min_size, self.max_size);
-                let mut result = Vec::new();
-                while collection.more() {
-                    result.push(self.elements.do_draw(data));
-                }
-                result
-            })
+            data.start_span(labels::LIST);
+            let mut collection =
+                Collection::new(data, "composite_list", self.min_size, self.max_size);
+            let mut result = Vec::new();
+            while collection.more() {
+                result.push(self.elements.do_draw(data));
+            }
+            data.stop_span(false);
+            result
         }
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<T>>> {
-        let elem_basic = self.elements.as_basic()?;
-        let elem_schema = elem_basic.schema().clone();
+        let basic = self.elements.as_basic()?;
 
         let mut schema = cbor_map! {
             "type" => "list",
             "unique" => self.unique,
-            "elements" => elem_schema,
+            "elements" => basic.schema().clone(),
             "min_size" => self.min_size as u64
         };
 
@@ -71,12 +69,11 @@ where
             let Value::Array(arr) = raw else {
                 panic!("Expected array, got {:?}", raw)
             };
-            arr.into_iter().map(|v| elem_basic.parse_raw(v)).collect()
+            arr.into_iter().map(|v| basic.parse_raw(v)).collect()
         }))
     }
 }
 
-/// Generate vectors.
 pub fn vecs<T, G: Generate<T>>(elements: G) -> VecGenerator<G, T> {
     VecGenerator {
         elements,
@@ -95,13 +92,13 @@ pub struct HashSetGenerator<G, T> {
 }
 
 impl<G, T> HashSetGenerator<G, T> {
-    pub fn with_min_size(mut self, min: usize) -> Self {
-        self.min_size = min;
+    pub fn min_size(mut self, min_size: usize) -> Self {
+        self.min_size = min_size;
         self
     }
 
-    pub fn with_max_size(mut self, max: usize) -> Self {
-        self.max_size = Some(max);
+    pub fn max_size(mut self, max_size: usize) -> Self {
+        self.max_size = Some(max_size);
         self
     }
 }
@@ -115,35 +112,33 @@ where
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Compositional fallback
-            data.span_group(labels::SET, || {
-                let max = self.max_size.unwrap_or(100);
-                let target_len = integers::<usize>()
-                    .with_min(self.min_size)
-                    .with_max(max)
-                    .do_draw(data);
+            data.start_span(labels::SET);
+            let max = self.max_size.unwrap_or(100);
+            let target_len = integers::<usize>()
+                .min_value(self.min_size)
+                .max_value(max)
+                .do_draw(data);
 
-                let mut set = HashSet::new();
-                let mut attempts = 0;
-                while set.len() < target_len && attempts < target_len * 10 {
-                    set.insert(
-                        data.span_group(labels::SET_ELEMENT, || self.elements.do_draw(data)),
-                    );
-                    attempts += 1;
-                }
-                set
-            })
+            let mut set = HashSet::new();
+            let mut attempts = 0;
+            while set.len() < target_len && attempts < target_len * 10 {
+                data.start_span(labels::SET_ELEMENT);
+                set.insert(self.elements.do_draw(data));
+                data.stop_span(false);
+                attempts += 1;
+            }
+            data.stop_span(false);
+            set
         }
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, HashSet<T>>> {
-        let elem_basic = self.elements.as_basic()?;
-        let elem_schema = elem_basic.schema().clone();
+        let basic = self.elements.as_basic()?;
 
         let mut schema = cbor_map! {
             "type" => "list",
             "unique" => true,
-            "elements" => elem_schema,
+            "elements" =>  basic.schema().clone(),
             "min_size" => self.min_size as u64
         };
 
@@ -155,7 +150,7 @@ where
             let Value::Array(arr) = raw else {
                 panic!("Expected array, got {:?}", raw)
             };
-            arr.into_iter().map(|v| elem_basic.parse_raw(v)).collect()
+            arr.into_iter().map(|v| basic.parse_raw(v)).collect()
         }))
     }
 }
@@ -178,13 +173,13 @@ pub struct HashMapGenerator<K, V, KT, VT> {
 }
 
 impl<K, V, KT, VT> HashMapGenerator<K, V, KT, VT> {
-    pub fn with_min_size(mut self, min: usize) -> Self {
-        self.min_size = min;
+    pub fn min_size(mut self, min_size: usize) -> Self {
+        self.min_size = min_size;
         self
     }
 
-    pub fn with_max_size(mut self, max: usize) -> Self {
-        self.max_size = Some(max);
+    pub fn max_size(mut self, max_size: usize) -> Self {
+        self.max_size = Some(max_size);
         self
     }
 }
@@ -199,41 +194,37 @@ where
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Compositional fallback
-            data.span_group(labels::MAP, || {
-                let max = self.max_size.unwrap_or(100);
-                let len = integers::<usize>()
-                    .with_min(self.min_size)
-                    .with_max(max)
-                    .do_draw(data);
+            data.start_span(labels::MAP);
+            let max = self.max_size.unwrap_or(100);
+            let len = integers::<usize>()
+                .min_value(self.min_size)
+                .max_value(max)
+                .do_draw(data);
 
-                let mut map = HashMap::new();
-                let max_attempts = len * 10;
-                let mut attempts = 0;
-                while map.len() < len && attempts < max_attempts {
-                    data.span_group(labels::MAP_ENTRY, || {
-                        let key = self.keys.do_draw(data);
-                        map.entry(key).or_insert_with(|| self.values.do_draw(data));
-                    });
-                    attempts += 1;
-                }
-                crate::assume(map.len() >= self.min_size);
-                map
-            })
+            let mut map = HashMap::new();
+            let max_attempts = len * 10;
+            let mut attempts = 0;
+            while map.len() < len && attempts < max_attempts {
+                data.start_span(labels::MAP_ENTRY);
+                let key = self.keys.do_draw(data);
+                map.entry(key).or_insert_with(|| self.values.do_draw(data));
+                data.stop_span(false);
+                attempts += 1;
+            }
+            crate::assume(map.len() >= self.min_size);
+            data.stop_span(false);
+            map
         }
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, HashMap<KT, VT>>> {
-        let key_basic = self.keys.as_basic()?;
-        let val_basic = self.values.as_basic()?;
-
-        let key_schema = key_basic.schema().clone();
-        let val_schema = val_basic.schema().clone();
+        let keys_basic = self.keys.as_basic()?;
+        let values_basic = self.values.as_basic()?;
 
         let mut schema = cbor_map! {
             "type" => "dict",
-            "keys" => key_schema,
-            "values" => val_schema,
+            "keys" => keys_basic.schema().clone(),
+            "values" => values_basic.schema().clone(),
             "min_size" => self.min_size as u64
         };
 
@@ -242,23 +233,24 @@ where
         }
 
         Some(BasicGenerator::new(schema, move |raw| {
-            // Wire format: [[key, value], ...]
-            let pairs = match raw {
+            // schema expects format [[key, value], ...]
+            let values = match raw {
                 Value::Array(arr) => arr,
-                _ => panic!("Expected array of pairs from dict schema, got {:?}", raw),
+                _ => panic!("Expected array, got {:?}", raw),
             };
 
             let mut map = HashMap::new();
-            for pair in pairs {
-                let mut pair_arr = match pair {
+            for value_raw in values {
+                let value = match value_raw {
                     Value::Array(arr) => arr,
-                    _ => panic!("Expected pair array, got {:?}", pair),
+                    _ => panic!("Expected array, got {:?}", value_raw),
                 };
-                let raw_value = pair_arr.pop().unwrap();
-                let raw_key = pair_arr.pop().unwrap();
+                let mut iter = value.into_iter();
+                let raw_v = iter.next().unwrap();
+                let raw_k = iter.next().unwrap();
 
-                let key = key_basic.parse_raw(raw_key);
-                let value = val_basic.parse_raw(raw_value);
+                let value = values_basic.parse_raw(raw_v);
+                let key = keys_basic.parse_raw(raw_k);
 
                 map.insert(key, value);
             }
@@ -346,15 +338,14 @@ impl Generate<Value> for FixedDictGenerator<'_> {
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Compositional fallback
-            data.span_group(labels::FIXED_DICT, || {
-                let entries: Vec<(Value, Value)> = self
-                    .fields
-                    .iter()
-                    .map(|(name, gen)| (Value::Text(name.clone()), gen.do_draw(data)))
-                    .collect();
-                Value::Map(entries)
-            })
+            data.start_span(labels::FIXED_DICT);
+            let entries: Vec<(Value, Value)> = self
+                .fields
+                .iter()
+                .map(|(name, gen)| (Value::Text(name.clone()), gen.do_draw(data)))
+                .collect();
+            data.stop_span(false);
+            Value::Map(entries)
         }
     }
 
@@ -432,9 +423,10 @@ impl<G: Generate<T> + Send + Sync, T, const N: usize> Generate<[T; N]> for Array
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            data.span_group(labels::TUPLE, || {
-                std::array::from_fn(|_| self.element.do_draw(data))
-            })
+            data.start_span(labels::TUPLE);
+            let result = std::array::from_fn(|_| self.element.do_draw(data));
+            data.stop_span(false);
+            result
         }
     }
 

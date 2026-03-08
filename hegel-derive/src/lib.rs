@@ -31,7 +31,7 @@ use syn::{parse_macro_input, Data, DeriveInput};
 /// }
 ///
 /// let gen = generators::from_type::<Person>()
-///     .with_age(generators::integers::<u32>().with_min(0).with_max(120));
+///     .with_age(generators::integers::<u32>().min_value(0).max_value(120));
 ///
 /// let person: Person = hegel::draw(&gen);
 /// ```
@@ -53,7 +53,7 @@ use syn::{parse_macro_input, Data, DeriveInput};
 ///     .with_Active(
 ///         generators::from_type::<Status>()
 ///             .default_Active()
-///             .with_since(generators::text().with_max_size(20))
+///             .with_since(generators::text().max_size(20))
 ///     );
 ///
 /// let status: Status = hegel::draw(&gen);

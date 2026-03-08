@@ -28,9 +28,9 @@ fn main() {
     });
 
     Hegel::new(move || {
-        let mut gen = generators::text().with_min_size(params.min_size);
+        let mut gen = generators::text().min_size(params.min_size);
         if let Some(max) = params.max_size {
-            gen = gen.with_max_size(max);
+            gen = gen.max_size(max);
         }
         let value = hegel::draw(&gen);
         // Report length in Unicode codepoints, not bytes

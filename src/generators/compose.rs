@@ -1,13 +1,6 @@
 use super::{Generate, TestCaseData};
 use std::marker::PhantomData;
 
-/// A generator created from imperative code that draws from other generators.
-///
-/// Use the `compose!` macro to create instances of this type.
-///
-/// `ComposedGenerator` wraps a closure that produces values by composing
-/// multiple generator calls together. It never has a basic form (returns `None` from `as_basic()`),
-/// since the composition is imperative and cannot be described as a single schema.
 pub struct ComposedGenerator<T, F> {
     f: F,
     _phantom: PhantomData<fn() -> T>,
@@ -17,10 +10,6 @@ impl<T, F> ComposedGenerator<T, F>
 where
     F: Fn() -> T,
 {
-    /// Create a new `ComposedGenerator` from a closure.
-    ///
-    /// Prefer using the `compose!` macro instead, which automatically
-    /// wraps the body in a labeled span for better shrinking.
     pub fn new(f: F) -> Self {
         ComposedGenerator {
             f,
@@ -65,8 +54,8 @@ pub const fn fnv1a_hash(bytes: &[u8]) -> u64 {
 ///
 /// # hegel::hegel(|| {
 /// let value = hegel::draw(&hegel::compose!(|draw| {
-///     let x = draw(&generators::integers::<i32>().with_min(0).with_max(10));
-///     let y = draw(&generators::integers::<i32>().with_min(x).with_max(100));
+///     let x = draw(&generators::integers::<i32>().min_value(0).max_value(10));
+///     let y = draw(&generators::integers::<i32>().min_value(x).max_value(100));
 ///     (x, y)
 /// }));
 /// # });
@@ -79,17 +68,19 @@ macro_rules! compose {
             let __data = $crate::generators::test_case_data().expect(
                 "compose!() cannot be called outside of a Hegel test."
             );
-            let __was_composite = __data.in_composite();
-            __data.set_in_composite(true);
-            let __result = __data.span_group(LABEL, || {
+            let __was_composite = __data.in_composite.get();
+            __data.in_composite.set(true);
+            __data.start_span(LABEL);
+            let __result = {
                 fn $draw<T>(gen: &impl $crate::generators::Generate<T>) -> T {
                     gen.do_draw($crate::generators::test_case_data().expect(
                         "compose!() cannot be called outside of a Hegel test."
                     ))
                 }
                 $($body)*
-            });
-            __data.set_in_composite(__was_composite);
+            };
+            __data.stop_span(false);
+            __data.in_composite.set(__was_composite);
             __result
         })
     }};

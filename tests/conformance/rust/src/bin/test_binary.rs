@@ -28,9 +28,9 @@ fn main() {
     });
 
     Hegel::new(move || {
-        let mut gen = generators::binary().with_min_size(params.min_size);
+        let mut gen = generators::binary().min_size(params.min_size);
         if let Some(max) = params.max_size {
-            gen = gen.with_max_size(max);
+            gen = gen.max_size(max);
         }
         let value = hegel::draw(&gen);
         write(&Metrics {

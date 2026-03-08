@@ -20,21 +20,21 @@ static PROTOCOL_DEBUG: LazyLock<bool> = LazyLock::new(|| {
     )
 });
 
-/// Per-test-case state, consolidating all thread-local state into one struct.
-///
-/// This is an internal implementation detail. Do not use directly.
+// shared per-test-case data
 #[doc(hidden)]
 pub struct TestCaseData {
     #[allow(dead_code)]
     connection: Arc<Connection>,
-    channel: Channel,
-    span_depth: Cell<usize>,
+    pub(crate) channel: Channel,
+    pub(crate) span_depth: Cell<usize>,
     verbosity: Verbosity,
-    is_last_run: bool,
+    pub(crate) is_last_run: bool,
     pub(crate) output: RefCell<Vec<String>>,
     draw_count: Cell<usize>,
-    test_aborted: Cell<bool>,
-    in_composite: Cell<bool>,
+    pub(crate) test_aborted: Cell<bool>,
+    // only public for our compose! macro. Ideally would be pub(crate).
+    #[doc(hidden)]
+    pub in_composite: Cell<bool>,
 }
 
 impl TestCaseData {
@@ -57,87 +57,47 @@ impl TestCaseData {
         }
     }
 
-    pub(crate) fn is_last_run(&self) -> bool {
-        self.is_last_run
-    }
-
-    pub(crate) fn test_aborted(&self) -> bool {
-        self.test_aborted.get()
-    }
-
-    pub(crate) fn set_test_aborted(&self, val: bool) {
-        self.test_aborted.set(val);
-    }
-
     pub(crate) fn record_draw<T: std::fmt::Debug>(&self, value: &T) {
         if !self.is_last_run {
             return;
         }
-        let n = self.draw_count.get() + 1;
-        self.draw_count.set(n);
+        let count = self.draw_count.get() + 1;
+        self.draw_count.set(count);
         self.output
             .borrow_mut()
-            .push(format!("Draw {}: {:?}", n, value));
+            .push(format!("Draw {}: {:?}", count, value));
     }
 
-    #[doc(hidden)]
-    pub fn in_composite(&self) -> bool {
-        self.in_composite.get()
-    }
-
-    #[doc(hidden)]
-    pub fn set_in_composite(&self, val: bool) {
-        self.in_composite.set(val);
-    }
-
-    fn increment_span_depth(&self) {
+    pub fn start_span(&self, label: u64) {
         self.span_depth.set(self.span_depth.get() + 1);
-    }
-
-    fn decrement_span_depth(&self) {
-        let depth = self.span_depth.get();
-        assert!(depth > 0, "stop_span called with no open spans");
-        self.span_depth.set(depth - 1);
-    }
-
-    pub(crate) fn channel(&self) -> &Channel {
-        &self.channel
-    }
-
-    fn verbosity(&self) -> Verbosity {
-        self.verbosity
-    }
-
-    fn start_span(&self, label: u64) {
-        self.increment_span_depth();
         if let Err(StopTestError) = self.send_request("start_span", &cbor_map! {"label" => label}) {
-            self.decrement_span_depth();
+            let depth = self.span_depth.get();
+            assert!(depth > 0);
+            self.span_depth.set(depth - 1);
             crate::assume(false);
         }
     }
 
-    fn stop_span(&self, discard: bool) {
-        self.decrement_span_depth();
-        // Ignore StopTest errors from stop_span - we're already closing
+    pub fn stop_span(&self, discard: bool) {
+        let depth = self.span_depth.get();
+        assert!(depth > 0);
+        self.span_depth.set(depth - 1);
         let _ = self.send_request("stop_span", &cbor_map! {"discard" => discard});
     }
 
-    /// Send a request and receive a response via the channel.
     /// Returns Err(StopTestError) if the server sends an overflow error.
     pub(super) fn send_request(
         &self,
         command: &str,
         payload: &Value,
     ) -> Result<Value, StopTestError> {
-        let debug = *PROTOCOL_DEBUG || self.verbosity() == Verbosity::Debug;
+        let debug = *PROTOCOL_DEBUG || self.verbosity == Verbosity::Debug;
 
-        // Build the request message by merging command into the payload map
         let mut entries = vec![(
             Value::Text("command".to_string()),
             Value::Text(command.to_string()),
         )];
 
-        // Merge payload fields into the request
         if let Value::Map(map) = payload {
             for (k, v) in map {
                 entries.push((k.clone(), v.clone()));
@@ -150,7 +110,7 @@ impl TestCaseData {
             eprintln!("REQUEST: {:?}", request);
         }
 
-        let result = self.channel().request_cbor(&request);
+        let result = self.channel.request_cbor(&request);
 
         match result {
             Ok(response) => {
@@ -167,7 +127,7 @@ impl TestCaseData {
                     }
                     // Mark test as aborted so the runner skips sending mark_complete
                     // (the server has already moved on from this test case)
-                    self.set_test_aborted(true);
+                    self.test_aborted.set(true);
                     Err(StopTestError)
                 } else {
                     panic!("Failed to communicate with Hegel: {}", e);
@@ -190,35 +150,10 @@ impl TestCaseData {
         }
     }
 
-    /// Generate a value from a schema, deserializing the result.
     pub fn generate_from_schema<T: serde::de::DeserializeOwned>(&self, schema: &Value) -> T {
         deserialize_value(self.generate_raw(schema))
     }
 
-    /// Run a function within a labeled span group.
-    ///
-    /// Groups related generation calls together, which helps the testing engine
-    /// understand the structure of generated data and improve shrinking.
-    pub fn span_group<T, F: FnOnce() -> T>(&self, label: u64, f: F) -> T {
-        self.start_span(label);
-        let result = f();
-        self.stop_span(false);
-        result
-    }
-
-    /// Run a function within a labeled span group, discarding if the function returns None.
-    ///
-    /// Useful for filter-like operations where rejected values should be discarded.
-    pub fn discardable_span_group<T, F: FnOnce() -> Option<T>>(
-        &self,
-        label: u64,
-        f: F,
-    ) -> Option<T> {
-        self.start_span(label);
-        let result = f();
-        self.stop_span(result.is_none());
-        result
-    }
 }
 
 /// Custom error for StopTest (overflow) condition.
@@ -244,8 +179,6 @@ pub fn deserialize_value<T: serde::de::DeserializeOwned>(raw: Value) -> T {
     })
 }
 
-/// Label constants for spans.
-/// These help Hypothesis understand the structure of generated data.
 #[doc(hidden)]
 pub mod labels {
     pub const LIST: u64 = 1;
@@ -260,7 +193,6 @@ pub mod labels {
     pub const FIXED_DICT: u64 = 10;
     pub const FLAT_MAP: u64 = 11;
     pub const FILTER: u64 = 12;
-    /// For .map() transformations (distinct from MAP which is for collections)
     pub const MAPPED: u64 = 13;
     pub const SAMPLED_FROM: u64 = 14;
     pub const ENUM_VARIANT: u64 = 15;
@@ -293,11 +225,6 @@ pub struct Collection<'a> {
 }
 
 impl<'a> Collection<'a> {
-    /// Create a new collection handle.
-    ///
-    /// The server-side `many` object is not created until the first call
-    /// to [`more()`](Collection::more), matching the Python SDK's lazy
-    /// initialization behavior.
     pub fn new(
         data: &'a TestCaseData,
         name: &str,
@@ -314,7 +241,6 @@ impl<'a> Collection<'a> {
         }
     }
 
-    /// Ensure the server-side collection is initialized, returning the server name.
     fn ensure_initialized(&mut self) -> &str {
         if self.server_name.is_none() {
             let mut payload = cbor_map! {
@@ -343,10 +269,6 @@ impl<'a> Collection<'a> {
         self.server_name.as_ref().unwrap()
     }
 
-    /// Check if more elements should be generated.
-    ///
-    /// On the first call, this lazily creates the server-side collection.
-    /// Returns `false` when the collection has reached its target size.
     pub fn more(&mut self) -> bool {
         if self.finished {
             return false;

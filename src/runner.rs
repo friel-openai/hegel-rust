@@ -275,12 +275,12 @@ where
         init_panic_hook();
 
         let mut attempts = 0;
+        // wait for socket initialization
         let stream = loop {
             if socket_path.exists() {
                 match UnixStream::connect(&socket_path) {
                     Ok(stream) => break stream,
                     Err(_) if attempts < 50 => {
-                        // socket exists but not yet listening
                         std::thread::sleep(Duration::from_millis(100));
                         attempts += 1;
                         continue;
@@ -299,16 +299,10 @@ where
             attempts += 1;
         };
 
-        // Set a read timeout so the SDK doesn't hang forever if the server
-        // crashes without sending a response (e.g. Python IndexError in
-        // send_response_error for UnsatisfiedAssumption).
+        // set a read timeout so we don't hang if the server crashes
         stream.set_read_timeout(Some(Duration::from_secs(120))).ok();
 
-        // Create connection and perform version negotiation
         let connection = Connection::new(stream);
-
-        // Initiate version negotiation (SDK is the client)
-        let (lo, hi) = SUPPORTED_PROTOCOL_VERSIONS;
         let control = connection.control_channel();
         let req_id = control
             .send_request(HANDSHAKE_STRING.to_vec())
@@ -325,15 +319,17 @@ where
                 panic!("Bad handshake response: {decoded:?}");
             }
         };
-        let v: f64 = server_version.parse().unwrap_or_else(|_| {
+        let version: f64 = server_version.parse().unwrap_or_else(|_| {
             let _ = child.kill();
             panic!("Bad version number: {server_version}");
         });
-        if !(lo <= v && v <= hi) {
+
+        let (lo, hi) = SUPPORTED_PROTOCOL_VERSIONS;
+        if !(lo <= version && version <= hi) {
             let _ = child.kill();
             panic!(
                 "hegel-rust supports protocol versions {lo} through {hi}, but \
-                 got server version {v}. Upgrading hegel-rust or downgrading \
+                 got server version {version}. Upgrading hegel-rust or downgrading \
                  your hegel server might help."
             );
         }
@@ -358,7 +354,6 @@ where
             .send_request(cbor_encode(&run_test_msg))
             .expect("Failed to send run_test");
 
-        // Wait for run_test response on control channel (just True, verifies no error)
         let run_test_response = control
             .receive_reply(run_test_id)
             .expect("Failed to receive run_test response");
@@ -368,7 +363,6 @@ where
             eprintln!("run_test response received");
         }
 
-        // Handle test_case events on the test channel until test_done
         let result_data: Value;
         let ack_null = cbor_map! {"result" => Value::Null};
         loop {
@@ -447,7 +441,6 @@ where
 
             let test_case_channel = connection.connect_channel(channel_id);
 
-            // Ack before running
             test_channel
                 .write_reply(event_id, cbor_encode(&ack_null))
                 .expect("Failed to ack final test_case");
@@ -466,13 +459,13 @@ where
             .and_then(as_bool)
             .unwrap_or(true);
 
-        // Close the connection so server process can exit gracefully
+        // clean up so the server can exit gracefully
         drop(test_channel);
         drop(control);
         let _ = connection.close();
         drop(connection);
 
-        let _ = child.wait().expect("Failed to wait for hegel");
+        let _ = child.wait().expect("Failed to wait for hegel server");
 
         if !passed || got_interesting.load(Ordering::SeqCst) {
             panic!("Property test failed");
@@ -546,10 +539,11 @@ fn run_test_case<F: FnMut()>(
         }
     };
 
+    assert!(data.span_depth.get() == 0);
+
     // Send mark_complete using the same channel that generators used.
     // Skip if test was aborted (StopTest) - server already closed the channel.
-    let was_aborted = data.test_aborted();
-    if !was_aborted {
+    if !data.test_aborted.get() {
         let origin_value = match &origin {
             Some(s) => Value::Text(s.clone()),
             None => Value::Null,
@@ -560,8 +554,8 @@ fn run_test_case<F: FnMut()>(
             "origin" => origin_value
         };
         // Wait for server to acknowledge mark_complete before closing
-        let _ = data.channel().request_cbor(&mark_complete);
-        let _ = data.channel().close();
+        let _ = data.channel.request_cbor(&mark_complete);
+        let _ = data.channel.close();
     }
 
     clear_test_case_data();

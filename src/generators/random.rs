@@ -70,8 +70,8 @@ impl RngCore for HegelRandom {
                     "Can't use random instances from randoms() used outside of a Hegel test",
                 );
                 let bytes: Vec<u8> = binary()
-                    .with_min_size(dest.len())
-                    .with_max_size(dest.len())
+                    .min_size(dest.len())
+                    .max_size(dest.len())
                     .do_draw(data);
                 dest.copy_from_slice(&bytes);
             }

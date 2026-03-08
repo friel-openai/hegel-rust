@@ -1,0 +1,12 @@
+use hegel::draw;
+use hegel::generators::{self};
+use std::sync::atomic::{AtomicI32, Ordering};
+
+static GLOBAL_COUNTER: AtomicI32 = AtomicI32::new(0);
+
+#[hegel::test]
+#[should_panic(expected = "Property test failed")]
+fn test_flaky_global_state() {
+    let _x = draw(&generators::integers::<i32>().min_value(GLOBAL_COUNTER.load(Ordering::SeqCst)));
+    GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
+}

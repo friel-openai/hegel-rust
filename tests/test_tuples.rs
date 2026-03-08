@@ -17,8 +17,8 @@ fn test_tuple2_basic() {
 #[hegel::test]
 fn test_tuple2_respects_bounds() {
     let (a, b): (i32, i32) = hegel::draw(&generators::tuples2(
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(100).with_max(200),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(100).max_value(200),
     ));
     assert!((0..=10).contains(&a));
     assert!((100..=200).contains(&b));
@@ -39,9 +39,9 @@ fn test_tuple3_basic() {
 #[hegel::test]
 fn test_tuple3_respects_bounds() {
     let (a, b, c): (i32, i32, i32) = hegel::draw(&generators::tuples3(
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(20).with_max(30),
-        generators::integers().with_min(40).with_max(50),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(20).max_value(30),
+        generators::integers().min_value(40).max_value(50),
     ));
     assert!((0..=10).contains(&a));
     assert!((20..=30).contains(&b));
@@ -53,10 +53,10 @@ fn test_tuple3_respects_bounds() {
 #[hegel::test]
 fn test_tuple4_basic() {
     let (a, b, c, d): (i32, i32, i32, i32) = hegel::draw(&generators::tuples4(
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(0).with_max(10),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(0).max_value(10),
     ));
     assert!((0..=10).contains(&a));
     assert!((0..=10).contains(&b));
@@ -193,12 +193,12 @@ fn test_tuple12() {
 fn test_tuple2_with_mapped_elements() {
     let (a, b): (i32, i32) = hegel::draw(&generators::tuples2(
         generators::integers::<i32>()
-            .with_min(i32::MIN / 2)
-            .with_max(i32::MAX / 2)
+            .min_value(i32::MIN / 2)
+            .max_value(i32::MAX / 2)
             .map(|x| x * 2),
         generators::integers::<i32>()
-            .with_min(0)
-            .with_max(100)
+            .min_value(0)
+            .max_value(100)
             .map(|x| x + 1),
     ));
     assert!(a % 2 == 0);
@@ -210,8 +210,8 @@ fn test_tuple2_with_mapped_elements() {
 #[hegel::test]
 fn test_tuple_mixed_types() {
     let (n, s, b, f): (i32, String, bool, f64) = hegel::draw(&generators::tuples4(
-        generators::integers().with_min(0).with_max(100),
-        generators::text().with_max_size(10),
+        generators::integers().min_value(0).max_value(100),
+        generators::text().max_size(10),
         generators::booleans(),
         generators::floats(),
     ));
@@ -226,10 +226,10 @@ fn test_tuple_mixed_types() {
 fn test_vec_of_tuples() {
     let vec: Vec<(i32, bool)> = hegel::draw(
         &generators::vecs(generators::tuples2(
-            generators::integers::<i32>().with_min(0).with_max(100),
+            generators::integers::<i32>().min_value(0).max_value(100),
             generators::booleans(),
         ))
-        .with_max_size(10),
+        .max_size(10),
     );
     for &(n, _b) in &vec {
         assert!((0..=100).contains(&n));
@@ -256,8 +256,8 @@ fn test_tuple2_can_find_both_true_and_false() {
 fn test_tuple2_all_examples_in_bounds() {
     assert_all_examples(
         generators::tuples2(
-            generators::integers::<i32>().with_min(0).with_max(10),
-            generators::integers::<i32>().with_min(0).with_max(10),
+            generators::integers::<i32>().min_value(0).max_value(10),
+            generators::integers::<i32>().min_value(0).max_value(10),
         ),
         |(a, b)| (0..=10).contains(a) && (0..=10).contains(b),
     );
@@ -267,9 +267,9 @@ fn test_tuple2_all_examples_in_bounds() {
 fn test_tuple3_all_examples_in_bounds() {
     assert_all_examples(
         generators::tuples3(
-            generators::integers::<i32>().with_min(-5).with_max(5),
-            generators::integers::<i32>().with_min(10).with_max(20),
-            generators::integers::<i32>().with_min(100).with_max(200),
+            generators::integers::<i32>().min_value(-5).max_value(5),
+            generators::integers::<i32>().min_value(10).max_value(20),
+            generators::integers::<i32>().min_value(100).max_value(200),
         ),
         |(a, b, c)| (-5..=5).contains(a) && (10..=20).contains(b) && (100..=200).contains(c),
     );

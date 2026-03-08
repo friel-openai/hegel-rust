@@ -37,10 +37,10 @@ fn main() {
         let mut gen = generators::floats::<f64>();
 
         if let Some(min) = params.min_value {
-            gen = gen.with_min(min);
+            gen = gen.min_value(min);
         }
         if let Some(max) = params.max_value {
-            gen = gen.with_max(max);
+            gen = gen.max_value(max);
         }
         if params.exclude_min {
             gen = gen.exclude_min();

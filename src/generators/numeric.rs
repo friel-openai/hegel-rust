@@ -11,15 +11,13 @@ pub struct IntegerGenerator<T> {
 }
 
 impl<T> IntegerGenerator<T> {
-    /// Set the minimum value (inclusive).
-    pub fn with_min(mut self, min: T) -> Self {
-        self.min = Some(min);
+    pub fn min_value(mut self, min_value: T) -> Self {
+        self.min = Some(min_value);
         self
     }
 
-    /// Set the maximum value (inclusive).
-    pub fn with_max(mut self, max: T) -> Self {
-        self.max = Some(max);
+    pub fn max_value(mut self, max_value: T) -> Self {
+        self.max = Some(max_value);
         self
     }
 }
@@ -70,7 +68,7 @@ where
 /// let gen = generators::integers::<i32>();
 ///
 /// // Generate u8 in range 0-100
-/// let gen = generators::integers::<u8>().with_min(0).with_max(100);
+/// let gen = generators::integers::<u8>().min_value(0).max_value(100);
 /// ```
 pub fn integers<T>() -> IntegerGenerator<T>
 where
@@ -83,11 +81,6 @@ where
     }
 }
 
-// ============================================================================
-// Float Generator
-// ============================================================================
-
-/// Generator for floating-point values.
 pub struct FloatGenerator<T> {
     min: Option<T>,
     max: Option<T>,
@@ -98,37 +91,31 @@ pub struct FloatGenerator<T> {
 }
 
 impl<T> FloatGenerator<T> {
-    /// Set the minimum value.
-    pub fn with_min(mut self, min: T) -> Self {
-        self.min = Some(min);
+    pub fn min_value(mut self, min_value: T) -> Self {
+        self.min = Some(min_value);
         self
     }
 
-    /// Set the maximum value.
-    pub fn with_max(mut self, max: T) -> Self {
-        self.max = Some(max);
+    pub fn max_value(mut self, max_value: T) -> Self {
+        self.max = Some(max_value);
         self
     }
 
-    /// Exclude the minimum value from the range.
     pub fn exclude_min(mut self) -> Self {
         self.exclude_min = true;
         self
     }
 
-    /// Exclude the maximum value from the range.
     pub fn exclude_max(mut self) -> Self {
         self.exclude_max = true;
         self
     }
 
-    /// Whether NaN values can be generated.
     pub fn allow_nan(mut self, allow: bool) -> Self {
         self.allow_nan = Some(allow);
         self
     }
 
-    /// Whether infinity values can be generated.
     pub fn allow_infinity(mut self, allow: bool) -> Self {
         self.allow_infinity = Some(allow);
         self
@@ -156,7 +143,6 @@ where
             "width" => width
         };
 
-        // Include user-specified bounds
         if let Some(ref min) = self.min {
             map_insert(&mut schema, "min_value", cbor_serialize(min));
         }

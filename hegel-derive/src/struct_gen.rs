@@ -156,11 +156,12 @@ pub(crate) fn derive_struct_generate(input: &DeriveInput, data: &syn::DataStruct
                     if let Some(basic) = self.as_basic() {
                         basic.parse_raw(__data.generate_raw(basic.schema()))
                     } else {
-                        __data.span_group(hegel::generators::labels::FIXED_DICT, || {
-                            #name {
-                                #(#generate_fields,)*
-                            }
-                        })
+                        __data.start_span(hegel::generators::labels::FIXED_DICT);
+                        let __result = #name {
+                            #(#generate_fields,)*
+                        };
+                        __data.stop_span(false);
+                        __result
                     }
                 }
 

@@ -34,7 +34,7 @@ fn test_optional_can_generate_none() {
 #[hegel::test]
 fn test_optional_respects_inner_generator_bounds() {
     let value = hegel::draw(&generators::optional(
-        generators::integers().with_min(10).with_max(20),
+        generators::integers().min_value(10).max_value(20),
     ));
     if let Some(n) = value {
         assert!((10..=20).contains(&n));
@@ -44,8 +44,8 @@ fn test_optional_respects_inner_generator_bounds() {
 #[hegel::test]
 fn test_one_of_returns_value_from_one_generator() {
     let value = hegel::draw(&hegel::one_of!(
-        generators::integers().with_min(0).with_max(10),
-        generators::integers().with_min(100).with_max(110),
+        generators::integers().min_value(0).max_value(10),
+        generators::integers().min_value(100).max_value(110),
     ));
     assert!((0..=10).contains(&value) || (100..=110).contains(&value));
 }
@@ -54,12 +54,12 @@ fn test_one_of_returns_value_from_one_generator() {
 fn test_one_of_with_different_types_via_map() {
     let value = hegel::draw(&hegel::one_of!(
         generators::integers::<i32>()
-            .with_min(0)
-            .with_max(100)
+            .min_value(0)
+            .max_value(100)
             .map(|n| format!("number: {}", n)),
         generators::text()
-            .with_min_size(1)
-            .with_max_size(10)
+            .min_size(1)
+            .max_size(10)
             .map(|s| format!("text: {}", s)),
     ));
     assert!(value.starts_with("number: ") || value.starts_with("text: "));
@@ -76,9 +76,9 @@ fn test_one_of_many() {
 fn test_flat_map() {
     let value = hegel::draw(
         &generators::integers::<usize>()
-            .with_min(1)
-            .with_max(5)
-            .flat_map(|len| generators::text().with_min_size(len).with_max_size(len)),
+            .min_value(1)
+            .max_value(5)
+            .flat_map(|len| generators::text().min_size(len).max_size(len)),
     );
     assert!(!value.is_empty());
     assert!(value.chars().count() <= 5);
@@ -88,8 +88,8 @@ fn test_flat_map() {
 fn test_filter() {
     let value = hegel::draw(
         &generators::integers::<i32>()
-            .with_min(0)
-            .with_max(100)
+            .min_value(0)
+            .max_value(100)
             .filter(|n| n % 2 == 0),
     );
     assert!(value % 2 == 0);
@@ -99,8 +99,8 @@ fn test_filter() {
 #[hegel::test]
 fn test_boxed_generator_clone() {
     let gen1 = generators::integers::<i32>()
-        .with_min(0)
-        .with_max(10)
+        .min_value(0)
+        .max_value(10)
         .boxed();
     let gen2 = gen1.clone();
     let v1 = hegel::draw(&gen1);
@@ -113,8 +113,8 @@ fn test_boxed_generator_clone() {
 fn test_boxed_generator_double_boxed() {
     // Calling .boxed() on an already-boxed generator should not re-wrap
     let gen1 = generators::integers::<i32>()
-        .with_min(0)
-        .with_max(10)
+        .min_value(0)
+        .max_value(10)
         .boxed();
     let gen2 = gen1.boxed();
     let value = hegel::draw(&gen2);
@@ -142,8 +142,8 @@ fn test_sampled_from_non_primitive() {
 fn test_optional_mapped() {
     let value = hegel::draw(&generators::optional(
         generators::integers::<i32>()
-            .with_min(0)
-            .with_max(100)
+            .min_value(0)
+            .max_value(100)
             .map(|n| format!("value: {}", n)),
     ));
     if let Some(s) = value {

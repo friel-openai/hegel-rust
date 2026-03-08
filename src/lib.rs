@@ -60,13 +60,13 @@
 //! # hegel::hegel(|| {
 //! // Integers - bounds default to type limits
 //! let i: i32 = hegel::draw(&generators::integers::<i32>());
-//! let bounded: i32 = hegel::draw(&generators::integers().with_min(0).with_max(100));
+//! let bounded: i32 = hegel::draw(&generators::integers().min_value(0).max_value(100));
 //!
 //! // Floating point
 //! let f: f64 = hegel::draw(&generators::floats::<f64>());
 //! let bounded: f64 = hegel::draw(&generators::floats()
-//!     .with_min(0.0)
-//!     .with_max(1.0)
+//!     .min_value(0.0)
+//!     .max_value(1.0)
 //!     .exclude_min()
 //!     .exclude_max());
 //! # });
@@ -79,7 +79,7 @@
 //!
 //! # hegel::hegel(|| {
 //! let s: String = hegel::draw(&generators::text());
-//! let bounded: String = hegel::draw(&generators::text().with_min_size(1).with_max_size(100));
+//! let bounded: String = hegel::draw(&generators::text().min_size(1).max_size(100));
 //!
 //! // Regex patterns (auto-anchored)
 //! let pattern: String = hegel::draw(&generators::from_regex(r"[a-z]{3}-[0-9]{3}"));
@@ -99,7 +99,7 @@
 //! use std::collections::{HashSet, HashMap};
 //!
 //! # hegel::hegel(|| {
-//! let vec: Vec<i32> = hegel::draw(&generators::vecs(generators::integers()).with_min_size(1));
+//! let vec: Vec<i32> = hegel::draw(&generators::vecs(generators::integers()).min_size(1));
 //! let set: HashSet<i32> = hegel::draw(&generators::hashsets(generators::integers()));
 //! let map: HashMap<String, i32> = hegel::draw(&generators::hashmaps(generators::text(), generators::integers()));
 //! # });
@@ -116,8 +116,8 @@
 //!
 //! // Choose from multiple generators
 //! let n: i32 = hegel::draw(&hegel::one_of!(
-//!     generators::integers::<i32>().with_min(0).with_max(10),
-//!     generators::integers::<i32>().with_min(100).with_max(110),
+//!     generators::integers::<i32>().min_value(0).max_value(10),
+//!     generators::integers::<i32>().min_value(100).max_value(110),
 //! ));
 //!
 //! // Optional values
@@ -133,8 +133,8 @@
 //! # hegel::hegel(|| {
 //! // Transform values
 //! let squared: i32 = hegel::draw(&generators::integers::<i32>()
-//!     .with_min(1)
-//!     .with_max(10)
+//!     .min_value(1)
+//!     .max_value(10)
 //!     .map(|x| x * x));
 //!
 //! // Filter values
@@ -143,9 +143,9 @@
 //!
 //! // Dependent generation
 //! let sized: String = hegel::draw(&generators::integers::<usize>()
-//!     .with_min(1)
-//!     .with_max(10)
-//!     .flat_map(|len| generators::text().with_min_size(len).with_max_size(len)));
+//!     .min_value(1)
+//!     .max_value(10)
+//!     .flat_map(|len| generators::text().min_size(len).max_size(len)));
 //! # });
 //! ```
 //!
@@ -170,7 +170,7 @@
 //!
 //! // Customize field generators
 //! let person: Person = hegel::draw(&generators::from_type::<Person>()
-//!     .with_age(generators::integers().with_min(0).with_max(120)));
+//!     .with_age(generators::integers().min_value(0).max_value(120)));
 //! # });
 //! ```
 //!

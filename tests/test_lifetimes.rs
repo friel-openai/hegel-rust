@@ -63,8 +63,8 @@ fn test_vec_of_references() {
     let refs: Vec<&i32> = options.iter().collect();
     let result: Vec<&i32> = hegel::draw(
         &generators::vecs(generators::sampled_from(refs))
-            .with_min_size(1)
-            .with_max_size(5),
+            .min_size(1)
+            .max_size(5),
     );
     assert!(!result.is_empty());
     for v in &result {
@@ -125,7 +125,7 @@ fn test_vec_of_tuples_of_references() {
             generators::sampled_from(kr),
             generators::sampled_from(vr),
         ))
-        .with_max_size(5),
+        .max_size(5),
     );
     for (k, v) in &result {
         assert!(keys.contains(k));
@@ -174,7 +174,7 @@ fn test_deeply_nested_reference_composition() {
                 None => 0,
             }),
         )
-        .with_max_size(5),
+        .max_size(5),
     );
 
     for v in &result {

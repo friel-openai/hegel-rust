@@ -48,14 +48,14 @@ fn main() {
             "integer" => {
                 let hashmap_gen = generators::hashmaps(
                     generators::integers::<i32>()
-                        .with_min(params.min_key)
-                        .with_max(params.max_key),
+                        .min_value(params.min_key)
+                        .max_value(params.max_key),
                     generators::integers::<i32>()
-                        .with_min(params.min_value)
-                        .with_max(params.max_value),
+                        .min_value(params.min_value)
+                        .max_value(params.max_value),
                 )
-                .with_min_size(params.min_size)
-                .with_max_size(params.max_size);
+                .min_size(params.min_size)
+                .max_size(params.max_size);
 
                 let map = hegel::draw(&hashmap_gen);
                 size = map.len();
@@ -75,11 +75,11 @@ fn main() {
                 let hashmap_gen = generators::hashmaps(
                     generators::text(),
                     generators::integers::<i32>()
-                        .with_min(params.min_value)
-                        .with_max(params.max_value),
+                        .min_value(params.min_value)
+                        .max_value(params.max_value),
                 )
-                .with_min_size(params.min_size)
-                .with_max_size(params.max_size);
+                .min_size(params.min_size)
+                .max_size(params.max_size);
 
                 let map = hegel::draw(&hashmap_gen);
                 size = map.len();

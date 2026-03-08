@@ -9,18 +9,15 @@ pub struct SampledFromGenerator<T> {
 
 impl<T: Clone + Send + Sync> Generate<T> for SampledFromGenerator<T> {
     fn do_draw(&self, data: &TestCaseData) -> T {
-        crate::assume(!self.elements.is_empty());
-
         if let Some(basic) = self.as_basic() {
             return basic.do_draw(data);
         }
 
-        // Generate index and pick
-        let idx_gen = integers::<usize>()
-            .with_min(0)
-            .with_max(self.elements.len() - 1);
-        let idx = idx_gen.do_draw(data);
-        self.elements[idx].clone()
+        let indices = integers::<usize>()
+            .min_value(0)
+            .max_value(self.elements.len() - 1);
+        let index = indices.do_draw(data);
+        self.elements[index].clone()
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
@@ -35,13 +32,17 @@ impl<T: Clone + Send + Sync> Generate<T> for SampledFromGenerator<T> {
         };
         let elements = self.elements.clone();
         Some(BasicGenerator::new(schema, move |raw| {
-            let idx: usize = super::deserialize_value(raw);
-            elements[idx].clone()
+            let index: usize = super::deserialize_value(raw);
+            elements[index].clone()
         }))
     }
 }
 
 pub fn sampled_from<T: Clone + Send + Sync>(elements: Vec<T>) -> SampledFromGenerator<T> {
+    assert!(
+        !elements.is_empty(),
+        "Collection passed to sampled_from cannot be empty"
+    );
     SampledFromGenerator { elements }
 }
 
@@ -51,19 +52,17 @@ pub struct OneOfGenerator<'a, T> {
 
 impl<T> Generate<T> for OneOfGenerator<'_, T> {
     fn do_draw(&self, data: &TestCaseData) -> T {
-        crate::assume(!self.generators.is_empty());
-
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Generate index and delegate
-            data.span_group(labels::ONE_OF, || {
-                let idx = integers::<usize>()
-                    .with_min(0)
-                    .with_max(self.generators.len() - 1)
-                    .do_draw(data);
-                self.generators[idx].do_draw(data)
-            })
+            data.start_span(labels::ONE_OF);
+            let index = integers::<usize>()
+                .min_value(0)
+                .max_value(self.generators.len() - 1)
+                .do_draw(data);
+            let result = self.generators[index].do_draw(data);
+            data.stop_span(false);
+            result
         }
     }
 
@@ -112,6 +111,10 @@ impl<T> Generate<T> for OneOfGenerator<'_, T> {
 ///
 /// For a more convenient syntax, use the `one_of!` macro instead.
 pub fn one_of<T>(generators: Vec<BoxedGenerator<'_, T>>) -> OneOfGenerator<'_, T> {
+    assert!(
+        !generators.is_empty(),
+        "one_of requires at least one generator"
+    );
     OneOfGenerator { generators }
 }
 
@@ -127,8 +130,8 @@ pub fn one_of<T>(generators: Vec<BoxedGenerator<'_, T>>) -> OneOfGenerator<'_, T
 ///
 /// # hegel::hegel(|| {
 /// let value: i32 = hegel::draw(&hegel::one_of!(
-///     generators::integers::<i32>().with_min(0).with_max(10),
-///     generators::integers::<i32>().with_min(100).with_max(110),
+///     generators::integers::<i32>().min_value(0).max_value(10),
+///     generators::integers::<i32>().min_value(100).max_value(110),
 /// ));
 /// # });
 /// ```
@@ -154,15 +157,15 @@ where
         if let Some(basic) = self.as_basic() {
             basic.do_draw(data)
         } else {
-            // Compositional fallback
-            data.span_group(labels::OPTIONAL, || {
-                let is_some: bool = data.generate_from_schema(&cbor_map! {"type" => "boolean"});
-                if is_some {
-                    Some(self.inner.do_draw(data))
-                } else {
-                    None
-                }
-            })
+            data.start_span(labels::OPTIONAL);
+            let is_some: bool = data.generate_from_schema(&cbor_map! {"type" => "boolean"});
+            let result = if is_some {
+                Some(self.inner.do_draw(data))
+            } else {
+                None
+            };
+            data.stop_span(false);
+            result
         }
     }
 

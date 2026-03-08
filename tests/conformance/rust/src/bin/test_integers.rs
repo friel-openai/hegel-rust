@@ -30,10 +30,10 @@ fn main() {
     Hegel::new(move || {
         let mut gen = generators::integers::<i32>();
         if let Some(min) = params.min_value {
-            gen = gen.with_min(min);
+            gen = gen.min_value(min);
         }
         if let Some(max) = params.max_value {
-            gen = gen.with_max(max);
+            gen = gen.max_value(max);
         }
         let value = hegel::draw(&gen);
         write(&Metrics { value });

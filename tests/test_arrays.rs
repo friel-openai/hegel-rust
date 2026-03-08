@@ -30,7 +30,7 @@ fn test_array_size_zero() {
 #[hegel::test]
 fn test_array_size_one() {
     let arr: [i32; 1] = hegel::draw(&generators::arrays(
-        generators::integers().with_min(10).with_max(20),
+        generators::integers().min_value(10).max_value(20),
     ));
     assert_eq!(arr.len(), 1);
     assert!((10..=20).contains(&arr[0]));
@@ -39,7 +39,7 @@ fn test_array_size_one() {
 #[hegel::test]
 fn test_array_respects_element_bounds() {
     let arr: [i32; 4] = hegel::draw(&generators::arrays(
-        generators::integers().with_min(0).with_max(100),
+        generators::integers().min_value(0).max_value(100),
     ));
     for &x in &arr {
         assert!((0..=100).contains(&x));
@@ -50,8 +50,8 @@ fn test_array_respects_element_bounds() {
 fn test_array_with_mapped_elements() {
     let arr: [i32; 3] = hegel::draw(&generators::arrays(
         generators::integers::<i32>()
-            .with_min(i32::MIN / 2)
-            .with_max(i32::MAX / 2)
+            .min_value(i32::MIN / 2)
+            .max_value(i32::MAX / 2)
             .map(|x| x * 2),
     ));
     for &x in &arr {
@@ -63,8 +63,8 @@ fn test_array_with_mapped_elements() {
 fn test_array_with_filtered_elements() {
     let arr: [i32; 3] = hegel::draw(&generators::arrays(
         generators::integers::<i32>()
-            .with_min(0)
-            .with_max(100)
+            .min_value(0)
+            .max_value(100)
             .filter(|n| n % 2 == 0),
     ));
     for &x in &arr {
@@ -75,7 +75,7 @@ fn test_array_with_filtered_elements() {
 #[hegel::test]
 fn test_array_of_arrays() {
     let arr: [[i32; 2]; 3] = hegel::draw(&generators::arrays(generators::arrays(
-        generators::integers::<i32>().with_min(0).with_max(50),
+        generators::integers::<i32>().min_value(0).max_value(50),
     )));
     assert_eq!(arr.len(), 3);
     for inner in &arr {
