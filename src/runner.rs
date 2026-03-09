@@ -18,8 +18,9 @@ const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
 const HEGEL_SERVER_VERSION: &str = "v0.3.3";
 const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
-static PANIC_HOOK_INIT: Once = Once::new();
 static HEGEL_SERVER_COMMAND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+static PANIC_HOOK_INIT: Once = Once::new();
 
 thread_local! {
     /// (thread_name, thread_id, location, backtrace)
@@ -155,6 +156,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
     let venv_dir = format!("{HEGEL_SERVER_DIR}/venv");
     let version_file = format!("{venv_dir}/hegel-version");
     let hegel_bin = format!("{venv_dir}/bin/hegel");
+    let install_log = format!("{HEGEL_SERVER_DIR}/install.log");
 
     // Check cached version
     if let Ok(cached) = std::fs::read_to_string(&version_file) {
@@ -166,7 +168,6 @@ fn ensure_hegel_installed() -> Result<String, String> {
     std::fs::create_dir_all(HEGEL_SERVER_DIR)
         .map_err(|e| format!("Failed to create {HEGEL_SERVER_DIR}: {e}"))?;
 
-    let install_log = format!("{HEGEL_SERVER_DIR}/install.log");
     let log_file = std::fs::File::create(&install_log)
         .map_err(|e| format!("Failed to create install log: {e}"))?;
 
