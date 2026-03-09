@@ -246,11 +246,11 @@ where
                     _ => panic!("Expected array, got {:?}", value_raw),
                 };
                 let mut iter = value.into_iter();
-                let raw_v = iter.next().unwrap();
                 let raw_k = iter.next().unwrap();
+                let raw_v = iter.next().unwrap();
 
-                let value = values_basic.parse_raw(raw_v);
                 let key = keys_basic.parse_raw(raw_k);
+                let value = values_basic.parse_raw(raw_v);
 
                 map.insert(key, value);
             }
