@@ -102,10 +102,18 @@ def check(base_ref: str) -> None:
 
 def pin_hegel_version(runner_rs: Path) -> None:
     """Pin HEGEL_SERVER_VERSION to the latest hegel-core release tag."""
-    tag = subprocess.check_output(
+    result = subprocess.run(
         ["gh", "api", "repos/antithesishq/hegel-core/releases/latest", "--jq", ".tag_name"],
         text=True,
-    ).strip()
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Failed to fetch latest hegel-core release. "
+            "Ensure the GitHub App token has access to antithesishq/hegel-core.\n"
+            f"stderr: {result.stderr.strip()}"
+        )
+    tag = result.stdout.strip()
 
     text = runner_rs.read_text()
     new_text = re.sub(
