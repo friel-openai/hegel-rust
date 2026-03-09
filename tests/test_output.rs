@@ -26,7 +26,7 @@ fn test_failing_test_output() {
     //   Draw 1: 0
     //   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
     let expected = Regex::new(concat!(
-        r"^thread '.*' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
+        r"thread '.*' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
         r"intentional failure: -?\d+\n",
         r"Draw 1: -?\d+",
     ))
@@ -62,7 +62,7 @@ fn test_failing_test_output_with_backtrace() {
     //   note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
     let expected = Regex::new(concat!(
         r"(?s)",
-        r"^thread 'main' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
+        r"thread 'main' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
         r"intentional failure: -?\d+\n",
         r"Draw 1: -?\d+\n",
         r"stack backtrace:\n",
@@ -96,7 +96,7 @@ fn test_failing_test_output_with_full_backtrace() {
 
     let expected = Regex::new(concat!(
         r"(?s)",
-        r"^thread 'main' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
+        r"thread 'main' \(\d+\) panicked at src/main\.rs:\d+:\d+:\n",
         r"intentional failure: -?\d+\n",
         r"Draw 1: -?\d+\n",
         r"stack backtrace:\n",

@@ -15,7 +15,11 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
-const HEGEL_BINARY_PATH: &str = env!("HEGEL_BINARY_PATH");
+const HEGEL_SERVER_VERSION: &str = "v0.3.3";
+const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
+const HEGEL_SERVER_DIR: &str = ".hegel";
+static HEGEL_SERVER_COMMAND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 static PANIC_HOOK_INIT: Once = Once::new();
 
 thread_local! {
@@ -148,6 +152,81 @@ fn init_panic_hook() {
     });
 }
 
+fn ensure_hegel_installed() -> Result<String, String> {
+    let venv_dir = format!("{HEGEL_SERVER_DIR}/venv");
+    let version_file = format!("{venv_dir}/hegel-version");
+    let hegel_bin = format!("{venv_dir}/bin/hegel");
+    let install_log = format!("{HEGEL_SERVER_DIR}/install.log");
+
+    // Check cached version
+    if let Ok(cached) = std::fs::read_to_string(&version_file) {
+        if cached.trim() == HEGEL_SERVER_VERSION && std::path::Path::new(&hegel_bin).is_file() {
+            return Ok(hegel_bin);
+        }
+    }
+
+    std::fs::create_dir_all(HEGEL_SERVER_DIR)
+        .map_err(|e| format!("Failed to create {HEGEL_SERVER_DIR}: {e}"))?;
+
+    let log_file = std::fs::File::create(&install_log)
+        .map_err(|e| format!("Failed to create install log: {e}"))?;
+
+    let status = std::process::Command::new("uv")
+        .args(["venv", "--clear", &venv_dir])
+        .stderr(log_file.try_clone().unwrap())
+        .stdout(log_file.try_clone().unwrap())
+        .status()
+        .map_err(|e| format!("Failed to run uv venv: {e}"))?;
+    if !status.success() {
+        let log = std::fs::read_to_string(&install_log).unwrap_or_default();
+        return Err(format!("uv venv failed. Install log:\n{log}"));
+    }
+
+    let python_path = format!("{venv_dir}/bin/python");
+    let status = std::process::Command::new("uv")
+        .args([
+            "pip",
+            "install",
+            "--python",
+            &python_path,
+            &format!(
+                "hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git@{HEGEL_SERVER_VERSION}"
+            ),
+        ])
+        .stderr(log_file.try_clone().unwrap())
+        .stdout(log_file)
+        .status()
+        .map_err(|e| format!("Failed to run uv pip install: {e}"))?;
+    if !status.success() {
+        let log = std::fs::read_to_string(&install_log).unwrap_or_default();
+        return Err(format!(
+            "Failed to install hegel (version: {HEGEL_SERVER_VERSION}). \
+             Set {HEGEL_SERVER_COMMAND_ENV} to a hegel binary path to skip installation.\n\
+             Install log:\n{log}"
+        ));
+    }
+
+    if !std::path::Path::new(&hegel_bin).is_file() {
+        return Err(format!("hegel not found at {hegel_bin} after installation"));
+    }
+
+    std::fs::write(&version_file, HEGEL_SERVER_VERSION)
+        .map_err(|e| format!("Failed to write version file: {e}"))?;
+
+    Ok(hegel_bin)
+}
+
+fn find_hegel() -> String {
+    if let Ok(override_path) = std::env::var(HEGEL_SERVER_COMMAND_ENV) {
+        return override_path;
+    }
+    HEGEL_SERVER_COMMAND
+        .get_or_init(|| {
+            ensure_hegel_installed().unwrap_or_else(|e| panic!("Failed to ensure hegel: {e}"))
+        })
+        .clone()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verbosity {
     Quiet,
@@ -256,7 +335,8 @@ where
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let socket_path = temp_dir.path().join("hegel.sock");
 
-        let mut cmd = Command::new(HEGEL_BINARY_PATH);
+        let hegel_binary_path = find_hegel();
+        let mut cmd = Command::new(&hegel_binary_path);
         cmd.arg(&socket_path)
             .arg("--verbosity")
             .arg(self.verbosity.as_str());
@@ -270,7 +350,7 @@ where
         #[allow(clippy::expect_fun_call)]
         let mut child = cmd
             .spawn()
-            .expect(format!("Failed to spawn hegel at path {}", HEGEL_BINARY_PATH).as_str());
+            .expect(format!("Failed to spawn hegel at path {}", hegel_binary_path).as_str());
 
         init_panic_hook();
 

@@ -15,11 +15,7 @@ Add to your `Cargo.toml`:
 hegel = { git = "ssh://git@github.com/antithesishq/hegel-rust" }
 ```
 
-The SDK requires the `hegel` CLI on your PATH:
-
-```bash
-pip install "hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git"
-```
+Hegel requires [`uv`](https://docs.astral.sh/uv/), and automatically installs the hegel server on first use. To override the hegel binary, set the `HEGEL_SERVER_CMD` environment variable.
 
 ## Quick Start
 

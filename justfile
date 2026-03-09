@@ -10,7 +10,7 @@ setup:
         mkdir -p "$HOME/.local/bin"
         ln -sf "$HEGEL_BINARY" "$HOME/.local/bin/hegel"
     else
-        uv tool install "hegel @ git+ssh://git@github.com/antithesishq/hegel.git"
+        uv tool install "hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git"
     fi
 
 check: lint docs test test-all-features
@@ -51,5 +51,5 @@ build-conformance:
     cargo build --release --manifest-path tests/conformance/rust/Cargo.toml
 
 conformance: build-conformance
-    uv run --with "hegel @ git+ssh://git@github.com/antithesishq/hegel.git" \
+    uv run --with "hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git" \
         --with pytest --with hypothesis pytest tests/conformance/test_conformance.py
