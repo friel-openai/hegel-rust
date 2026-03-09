@@ -15,6 +15,9 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
+const HEGEL_SERVER_VERSION: &str = "6e327df2dd42553de12ace94cfbddfbbd9e4bf50";
+const HEGEL_SERVER_CMD_ENV: &str = "HEGEL_CMD";
+const HEGEL_SERVER_DIR: &str = ".hegel";
 static PANIC_HOOK_INIT: Once = Once::new();
 
 thread_local! {
@@ -147,31 +150,21 @@ fn init_panic_hook() {
     });
 }
 
-/// The hegel-core release tag this SDK is designed to work with.
-const HEGEL_VERSION: &str = "v0.3.3";
-
-const HEGEL_CMD_ENV: &str = "HEGEL_CMD";
-const HEGEL_DIR: &str = ".hegel";
-
-fn hegel_pip_spec() -> String {
-    format!("hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git@{HEGEL_VERSION}")
-}
-
 fn ensure_hegel_installed() -> Result<String, String> {
-    let venv_dir = format!("{HEGEL_DIR}/venv");
+    let venv_dir = format!("{HEGEL_SERVER_DIR}/venv");
     let version_file = format!("{venv_dir}/hegel-version");
     let hegel_bin = format!("{venv_dir}/bin/hegel");
 
     // Check cached version
     if let Ok(cached) = std::fs::read_to_string(&version_file) {
-        if cached.trim() == HEGEL_VERSION && std::path::Path::new(&hegel_bin).is_file() {
+        if cached.trim() == HEGEL_SERVER_VERSION && std::path::Path::new(&hegel_bin).is_file() {
             return Ok(hegel_bin);
         }
     }
 
-    std::fs::create_dir_all(HEGEL_DIR).map_err(|e| format!("Failed to create .hegel: {e}"))?;
+    std::fs::create_dir_all(HEGEL_SERVER_DIR).map_err(|e| format!("Failed to create .hegel: {e}"))?;
 
-    eprintln!("Installing hegel ({HEGEL_VERSION}) into {venv_dir}...");
+    eprintln!("Installing hegel ({HEGEL_SERVER_VERSION}) into {venv_dir}...");
 
     let status = std::process::Command::new("uv")
         .args(["venv", "--clear", &venv_dir])
@@ -190,7 +183,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
             "install",
             "--python",
             &python_path,
-            &hegel_pip_spec(),
+            &format!("hegel @ git+ssh://git@github.com/antithesishq/hegel-core.git@{HEGEL_SERVER_VERSION}"),
         ])
         .stderr(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
@@ -198,8 +191,8 @@ fn ensure_hegel_installed() -> Result<String, String> {
         .map_err(|e| format!("Failed to run uv pip install: {e}"))?;
     if !status.success() {
         return Err(format!(
-            "Failed to install hegel (version: {HEGEL_VERSION}). \
-             Set {HEGEL_CMD_ENV} to a hegel binary path to skip installation."
+            "Failed to install hegel (version: {HEGEL_SERVER_VERSION}). \
+             Set {HEGEL_SERVER_CMD_ENV} to a hegel binary path to skip installation."
         ));
     }
 
@@ -207,14 +200,14 @@ fn ensure_hegel_installed() -> Result<String, String> {
         return Err(format!("hegel not found at {hegel_bin} after installation"));
     }
 
-    std::fs::write(&version_file, HEGEL_VERSION)
+    std::fs::write(&version_file, HEGEL_SERVER_VERSION)
         .map_err(|e| format!("Failed to write version file: {e}"))?;
 
     Ok(hegel_bin)
 }
 
 fn find_hegel() -> String {
-    if let Ok(override_path) = std::env::var(HEGEL_CMD_ENV) {
+    if let Ok(override_path) = std::env::var(HEGEL_SERVER_CMD_ENV) {
         return override_path;
     }
     static HEGEL_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();

@@ -132,8 +132,7 @@ def release() -> None:
     set_version(ROOT / "Cargo.toml", new_version)
     set_version(ROOT / "hegel-derive" / "Cargo.toml", new_version)
 
-    runner_rs = ROOT / "src" / "runner.rs"
-    pin_hegel_version(runner_rs)
+    pin_hegel_version(ROOT / "src" / "runner.rs")
 
     # regenerate lockfile after version bump
     subprocess.run(["cargo", "generate-lockfile"], check=True, cwd=ROOT)
