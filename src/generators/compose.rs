@@ -63,13 +63,14 @@ pub const fn fnv1a_hash(bytes: &[u8]) -> u64 {
 /// ```no_run
 /// use hegel::generators;
 ///
-/// # hegel::hegel(|| {
-/// let value = hegel::draw(&hegel::compose!(|draw| {
-///     let x = draw(&generators::integers::<i32>().with_min(0).with_max(10));
-///     let y = draw(&generators::integers::<i32>().with_min(x).with_max(100));
-///     (x, y)
-/// }));
-/// # });
+/// #[hegel::test]
+/// fn my_test() {
+///     let value = hegel::draw(&hegel::compose!(|draw| {
+///         let x = draw(&generators::integers::<i32>().with_min(0).with_max(10));
+///         let y = draw(&generators::integers::<i32>().with_min(x).with_max(100));
+///         (x, y)
+///     }));
+/// }
 /// ```
 #[macro_export]
 macro_rules! compose {

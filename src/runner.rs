@@ -256,10 +256,11 @@ impl Verbosity {
 /// ```no_run
 /// use hegel::generators;
 ///
-/// hegel::hegel(|| {
+/// #[hegel::test]
+/// fn test_identity() {
 ///     let n = hegel::draw(&generators::integers::<i32>());
 ///     assert!(n + 0 == n); // Identity property
-/// });
+/// }
 /// ```
 pub fn hegel<F>(test_fn: F)
 where
@@ -276,15 +277,14 @@ where
 /// # Example
 ///
 /// ```no_run
-/// use hegel::{Hegel, Verbosity, generators};
+/// use hegel::Verbosity;
+/// use hegel::generators;
 ///
-/// Hegel::new(|| {
+/// #[hegel::test(test_cases = 500, verbosity = Verbosity::Verbose)]
+/// fn test_with_options() {
 ///     let n = hegel::draw(&generators::integers::<i32>());
 ///     assert!(n + 0 == n);
-/// })
-/// .test_cases(500)
-/// .verbosity(Verbosity::Verbose)
-/// .run();
+/// }
 /// ```
 pub struct Hegel<F> {
     test_fn: F,

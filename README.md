@@ -22,13 +22,11 @@ Hegel requires [`uv`](https://docs.astral.sh/uv/), and automatically installs th
 ```rust
 use hegel::generators::{self, Generate};
 
-#[test]
+#[hegel::test]
 fn test_addition_commutative() {
-    hegel::hegel(|| {
-        let x = generators::integers::<i32>().generate();
-        let y = generators::integers::<i32>().generate();
-        assert_eq!(x + y, y + x);
-    });
+    let x = generators::integers::<i32>().generate();
+    let y = generators::integers::<i32>().generate();
+    assert_eq!(x + y, y + x);
 }
 ```
 

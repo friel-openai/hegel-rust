@@ -87,14 +87,15 @@ impl RngCore for HegelRandom {
 /// use rand::Rng;
 /// use rand::prelude::{IndexedRandom, SliceRandom};
 ///
-/// # hegel::hegel(|| {
-/// let mut rng = hegel::draw(&randoms());
+/// #[hegel::test]
+/// fn my_test() {
+///     let mut rng = hegel::draw(&randoms());
 ///
-/// let a: i32 = rng.random_range(1..=100);
-/// let b: bool = rng.random();
-/// let c = vec![1, 2, 3, 4, 5].choose(&mut rng);
-/// vec![1, 2, 3].shuffle(&mut rng);
-/// # });
+///     let a: i32 = rng.random_range(1..=100);
+///     let b: bool = rng.random();
+///     let c = vec![1, 2, 3, 4, 5].choose(&mut rng);
+///     vec![1, 2, 3].shuffle(&mut rng);
+/// }
 /// ```
 pub fn randoms() -> RandomsGenerator {
     RandomsGenerator {
