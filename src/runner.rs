@@ -16,10 +16,10 @@ use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
 const HEGEL_SERVER_VERSION: &str = "v0.3.3";
-const HEGEL_SERVER_CMD_ENV: &str = "HEGEL_CMD";
+const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
 static PANIC_HOOK_INIT: Once = Once::new();
-static HEGEL_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static HEGEL_SERVER_COMMAND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 thread_local! {
     /// (thread_name, thread_id, location, backtrace)
@@ -200,7 +200,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
         let log = std::fs::read_to_string(&install_log).unwrap_or_default();
         return Err(format!(
             "Failed to install hegel (version: {HEGEL_SERVER_VERSION}). \
-             Set {HEGEL_SERVER_CMD_ENV} to a hegel binary path to skip installation.\n\
+             Set {HEGEL_SERVER_COMMAND_ENV} to a hegel binary path to skip installation.\n\
              Install log:\n{log}"
         ));
     }
@@ -216,10 +216,10 @@ fn ensure_hegel_installed() -> Result<String, String> {
 }
 
 fn find_hegel() -> String {
-    if let Ok(override_path) = std::env::var(HEGEL_SERVER_CMD_ENV) {
+    if let Ok(override_path) = std::env::var(HEGEL_SERVER_COMMAND_ENV) {
         return override_path;
     }
-    HEGEL_PATH
+    HEGEL_SERVER_COMMAND
         .get_or_init(|| {
             ensure_hegel_installed().unwrap_or_else(|e| panic!("Failed to ensure hegel: {e}"))
         })
