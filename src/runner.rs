@@ -15,7 +15,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
-const HEGEL_SERVER_VERSION: &str = "6e327df2dd42553de12ace94cfbddfbbd9e4bf50";
+const HEGEL_SERVER_VERSION: &str = "v0.3.3";
 const HEGEL_SERVER_CMD_ENV: &str = "HEGEL_CMD";
 const HEGEL_SERVER_DIR: &str = ".hegel";
 static PANIC_HOOK_INIT: Once = Once::new();
