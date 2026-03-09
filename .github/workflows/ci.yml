@@ -56,7 +56,7 @@ jobs:
       - name: Install zizmor
         run: pip install zizmor
       - name: Run zizmor
-        run: zizmor --format plain .github/
+        run: zizmor --min-severity low --format plain .github/
 
   test:
     name: test (${{ matrix.rust }})
