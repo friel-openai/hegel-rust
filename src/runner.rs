@@ -15,7 +15,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.1, 0.3);
-const HEGEL_SERVER_VERSION: &str = "v0.3.4";
+const HEGEL_SERVER_VERSION: &str = "v0.3.5";
 const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
 static HEGEL_SERVER_COMMAND: std::sync::OnceLock<String> = std::sync::OnceLock::new();

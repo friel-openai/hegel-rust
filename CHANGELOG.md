@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 - 2026-03-10
+
+Update references from `hegel::hegel` to `#[hegel::test]`.
+
 ## 0.2.1 - 2026-03-10
 
 Remove `with_*` prefix from builder methods.
