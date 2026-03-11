@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 - 2026-03-10
+
+Add argument validation.
+
 ## 0.2.2 - 2026-03-10
 
 Update references from `hegel::hegel` to `#[hegel::test]`.
