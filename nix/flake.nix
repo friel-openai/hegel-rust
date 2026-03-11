@@ -38,6 +38,7 @@
               pkgs.rustc
               hegel.packages.${system}.default
             ];
+            HEGEL_SERVER_COMMAND = "${hegel.packages.${system}.default}/bin/hegel";
           };
         }
       );
