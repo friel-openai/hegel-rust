@@ -23,7 +23,7 @@ macro_rules! float_tests {
                     .allow_nan(false)
                     .allow_infinity(false),
             );
-            let n = tc.draw(&generators::floats::<$t>().min_value(min));
+            let n = tc.draw(generators::floats::<$t>().min_value(min));
             assert!(n >= min, "{n} should be >= {min}");
         }
 
@@ -34,7 +34,7 @@ macro_rules! float_tests {
                     .allow_nan(false)
                     .allow_infinity(false),
             );
-            let n = tc.draw(&generators::floats::<$t>().max_value(max));
+            let n = tc.draw(generators::floats::<$t>().max_value(max));
             assert!(n <= max, "{n} should be <= {max}");
         }
 
@@ -52,7 +52,7 @@ macro_rules! float_tests {
             );
             let min = a.min(b);
             let max = a.max(b);
-            let n = tc.draw(&generators::floats::<$t>().min_value(min).max_value(max));
+            let n = tc.draw(generators::floats::<$t>().min_value(min).max_value(max));
             assert!(n >= min && n <= max, "{n} should be in [{min}, {max}]");
         }
 
@@ -64,7 +64,7 @@ macro_rules! float_tests {
                     .allow_infinity(false),
             );
             tc.assume(min.next_up().is_finite());
-            let n = tc.draw(&generators::floats::<$t>().min_value(min).exclude_min());
+            let n = tc.draw(generators::floats::<$t>().min_value(min).exclude_min());
             assert!(n > min, "{n} should be > {min}");
         }
 
@@ -76,7 +76,7 @@ macro_rules! float_tests {
                     .allow_infinity(false),
             );
             tc.assume(max.next_down().is_finite());
-            let n = tc.draw(&generators::floats::<$t>().max_value(max).exclude_max());
+            let n = tc.draw(generators::floats::<$t>().max_value(max).exclude_max());
             assert!(n < max, "{n} should be < {max}");
         }
 
@@ -142,8 +142,8 @@ macro_rules! float_tests {
                 }
             }
 
-            let exmin = low.is_some() && tc.draw(&generators::booleans());
-            let exmax = high.is_some() && tc.draw(&generators::booleans());
+            let exmin = low.is_some() && tc.draw(generators::booleans());
+            let exmax = high.is_some() && tc.draw(generators::booleans());
 
             if let (Some(lo), Some(hi)) = (low, high) {
                 let effective_lo = if exmin { lo.next_up() } else { lo };
@@ -165,7 +165,7 @@ macro_rules! float_tests {
                 g = g.exclude_max();
             }
 
-            let val = tc.draw(&g);
+            let val = tc.draw(g);
 
             if val.is_finite() {
                 if let Some(lo) = low {

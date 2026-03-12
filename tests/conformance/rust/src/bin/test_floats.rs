@@ -55,7 +55,7 @@ fn main() {
             gen = gen.allow_infinity(allow_infinity);
         }
 
-        let value = tc.draw(&gen);
+        let value = tc.draw(gen);
         write(&Metrics {
             value,
             is_nan: value.is_nan(),

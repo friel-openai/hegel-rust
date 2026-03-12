@@ -6,12 +6,12 @@ use hegel::TestCase;
 
 #[hegel::test]
 fn test_basic_usage(tc: TestCase) {
-    let _ = tc.draw(&generators::booleans());
+    let _ = tc.draw(generators::booleans());
 }
 
 #[hegel::test(test_cases = 10)]
 fn test_with_settings(tc: TestCase) {
-    let _ = tc.draw(&generators::booleans());
+    let _ = tc.draw(generators::booleans());
 }
 
 #[test]

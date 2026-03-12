@@ -35,7 +35,7 @@ fn main() {
         if let Some(max) = params.max_value {
             gen = gen.max_value(max);
         }
-        let value = tc.draw(&gen);
+        let value = tc.draw(gen);
         write(&Metrics { value });
     })
     .test_cases(get_test_cases())

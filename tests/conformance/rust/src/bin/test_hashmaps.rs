@@ -57,7 +57,7 @@ fn main() {
                 .min_size(params.min_size)
                 .max_size(params.max_size);
 
-                let map = tc.draw(&hashmap_gen);
+                let map = tc.draw(hashmap_gen);
                 size = map.len();
                 if map.is_empty() {
                     min_key = None;
@@ -81,7 +81,7 @@ fn main() {
                 .min_size(params.min_size)
                 .max_size(params.max_size);
 
-                let map = tc.draw(&hashmap_gen);
+                let map = tc.draw(hashmap_gen);
                 size = map.len();
                 min_key = None;
                 max_key = None;

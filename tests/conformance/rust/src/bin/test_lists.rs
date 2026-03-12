@@ -45,7 +45,7 @@ fn main() {
             vec_gen = vec_gen.max_size(max);
         }
 
-        let list = tc.draw(&vec_gen);
+        let list = tc.draw(vec_gen);
 
         let size = list.len();
         let (min_element, max_element) = if list.is_empty() {

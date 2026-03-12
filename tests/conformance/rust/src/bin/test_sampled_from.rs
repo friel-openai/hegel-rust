@@ -27,7 +27,7 @@ fn main() {
     });
 
     Hegel::new(move |tc| {
-        let value = tc.draw(&generators::sampled_from(params.options.clone()));
+        let value = tc.draw(generators::sampled_from(params.options.clone()));
         write(&Metrics { value });
     })
     .test_cases(get_test_cases())

@@ -8,7 +8,7 @@ use hegel::generators;
 
 fn main() {
     hegel::hegel(|tc| {
-        let x = tc.draw(&generators::integers::<i32>());
+        let x = tc.draw(generators::integers::<i32>());
         panic!("intentional failure: {}", x);
     });
 }
