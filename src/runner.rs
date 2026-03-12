@@ -1,3 +1,4 @@
+use crate::antithesis::TestLocation;
 use crate::control::{
     clear_test_case_data, currently_in_test_context, set_test_case_data, ASSUME_FAIL_STRING,
 };
@@ -318,6 +319,7 @@ pub struct Hegel<F> {
     test_cases: u64,
     verbosity: Verbosity,
     seed: Option<u64>,
+    test_location: Option<TestLocation>,
 }
 
 impl<F> Hegel<F>
@@ -330,6 +332,7 @@ where
             test_cases: 100,
             verbosity: Verbosity::Normal,
             seed: None,
+            test_location: None,
         }
     }
 
@@ -345,6 +348,11 @@ where
 
     pub fn seed(mut self, seed: Option<u64>) -> Self {
         self.seed = seed;
+        self
+    }
+
+    pub fn test_location(mut self, location: TestLocation) -> Self {
+        self.test_location = Some(location);
         self
     }
 
@@ -580,7 +588,13 @@ where
 
         let _ = child.wait().expect("Failed to wait for hegel server");
 
-        if !passed || got_interesting.load(Ordering::SeqCst) {
+        let test_failed = !passed || got_interesting.load(Ordering::SeqCst);
+
+        if let Some(ref loc) = self.test_location {
+            crate::antithesis::emit_assertion(loc, !test_failed);
+        }
+
+        if test_failed {
             panic!("Property test failed");
         }
     }
