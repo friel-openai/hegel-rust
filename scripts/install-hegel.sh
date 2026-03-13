@@ -45,8 +45,12 @@ fi
 mkdir -p "$cache_base/versions"
 find "$cache_base/versions" -maxdepth 1 -name '.install-*' -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Use a lockfile to prevent concurrent installs of the same version.
-# On macOS, flock is not available, so we use mkdir as an atomic lock.
+# Concurrency: We can't install to a temp dir and atomically rename it into
+# place, because uv bakes absolute paths into entry-point shebangs — moving
+# the venv after install breaks the hegel binary. So we install directly into
+# the final version_dir and use a lock + completion marker to coordinate
+# concurrent processes. mkdir is used as the lock primitive because flock is
+# not available on macOS.
 lockdir="$cache_base/versions/.lock-$HEGEL_VERSION"
 
 acquire_lock() {
