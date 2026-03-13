@@ -12,11 +12,11 @@ use syn::{parse_macro_input, Data, DeriveInput};
 /// allowing it to be used with [`from_type`](hegel::generators::from_type) via `from_type::<T>()`.
 ///
 /// For structs, the generated generator has:
-/// - `with_<field>(gen)` - builder method to customize each field's generator
+/// - `with_<field>(generator)` - builder method to customize each field's generator
 ///
 /// For enums, the generated generator has:
 /// - `default_<VariantName>()` - methods returning default variant generators
-/// - `with_<VariantName>(gen)` - builder methods to customize variant generation
+/// - `with_<VariantName>(generator)` - builder methods to customize variant generation
 ///
 /// # Struct Example
 ///
@@ -32,9 +32,9 @@ use syn::{parse_macro_input, Data, DeriveInput};
 ///
 /// #[hegel::test]
 /// fn generates_people(tc: hegel::TestCase) {
-///     let gen = generators::from_type::<Person>()
+///     let generator = generators::from_type::<Person>()
 ///         .with_age(generators::integers::<u32>().min_value(0).max_value(120));
-///     let person: Person = tc.draw(gen);
+///     let person: Person = tc.draw(generator);
 /// }
 /// ```
 ///
@@ -53,13 +53,13 @@ use syn::{parse_macro_input, Data, DeriveInput};
 ///
 /// #[hegel::test]
 /// fn generates_statuses(tc: hegel::TestCase) {
-///     let gen = generators::from_type::<Status>()
+///     let generator = generators::from_type::<Status>()
 ///         .with_Active(
 ///             generators::from_type::<Status>()
 ///                 .default_Active()
 ///                 .with_since(generators::text().max_size(20))
 ///         );
-///     let status: Status = tc.draw(gen);
+///     let status: Status = tc.draw(generator);
 /// }
 /// ```
 #[proc_macro_derive(Generator)]
