@@ -1,8 +1,6 @@
-use crate::control::{
-    clear_test_case_data, currently_in_test_context, set_test_case_data, ASSUME_FAIL_STRING,
-};
-use crate::generators::TestCaseData;
+use crate::control::{currently_in_test_context, set_in_test_context};
 use crate::protocol::{Channel, Connection, HANDSHAKE_STRING};
+use crate::test_case::{TestCase, ASSUME_FAIL_STRING};
 use ciborium::Value;
 
 use crate::cbor_utils::{as_bool, as_text, as_u64, cbor_map, map_get};
@@ -282,14 +280,14 @@ impl Verbosity {
 /// use hegel::generators;
 ///
 /// #[hegel::test]
-/// fn test_identity() {
-///     let n = hegel::draw(&generators::integers::<i32>());
+/// fn test_identity(tc: hegel::TestCase) {
+///     let n = tc.draw(generators::integers::<i32>());
 ///     assert!(n + 0 == n); // Identity property
 /// }
 /// ```
 pub fn hegel<F>(test_fn: F)
 where
-    F: FnMut(),
+    F: FnMut(TestCase),
 {
     Hegel::new(test_fn).run();
 }
@@ -306,8 +304,8 @@ where
 /// use hegel::generators;
 ///
 /// #[hegel::test(test_cases = 500, verbosity = Verbosity::Verbose)]
-/// fn test_with_options() {
-///     let n = hegel::draw(&generators::integers::<i32>());
+/// fn test_with_options(tc: hegel::TestCase) {
+///     let n = tc.draw(generators::integers::<i32>());
 ///     assert!(n + 0 == n);
 /// }
 /// ```
@@ -320,7 +318,7 @@ pub struct Hegel<F> {
 
 impl<F> Hegel<F>
 where
-    F: FnMut(),
+    F: FnMut(TestCase),
 {
     pub fn new(test_fn: F) -> Self {
         Self {
@@ -583,7 +581,7 @@ where
 }
 
 /// Run a single test case.
-fn run_test_case<F: FnMut()>(
+fn run_test_case<F: FnMut(TestCase)>(
     connection: &Arc<Connection>,
     test_channel: Channel,
     test_fn: &mut F,
@@ -591,13 +589,12 @@ fn run_test_case<F: FnMut()>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) {
-    // Create TestCaseData on the stack and set thread-local pointer.
-    // Note: we pass the channel directly (not cloned) so generators and mark_complete
-    // share the same message ID sequence.
-    let data = TestCaseData::new(Arc::clone(connection), test_channel, verbosity, is_final);
-    set_test_case_data(&data);
+    // Create TestCase. The test function gets a clone (cheap Rc bump),
+    // so we retain access to the same underlying TestCaseData after the test runs.
+    let tc = TestCase::new(Arc::clone(connection), test_channel, verbosity, is_final);
+    set_in_test_context(true);
 
-    let result = catch_unwind(AssertUnwindSafe(test_fn));
+    let result = catch_unwind(AssertUnwindSafe(|| test_fn(tc.clone())));
 
     let (status, origin) = match &result {
         Ok(()) => ("VALID".to_string(), None),
@@ -626,7 +623,7 @@ fn run_test_case<F: FnMut()>(
                     );
                     eprintln!("{}", msg);
 
-                    for value in std::mem::take(&mut *data.output.borrow_mut()) {
+                    for value in tc.take_output() {
                         eprintln!("{}", value);
                     }
 
@@ -650,7 +647,7 @@ fn run_test_case<F: FnMut()>(
 
     // Send mark_complete using the same channel that generators used.
     // Skip if test was aborted (StopTest) - server already closed the channel.
-    if !data.test_aborted.get() {
+    if !tc.test_aborted() {
         let origin_value = match &origin {
             Some(s) => Value::Text(s.clone()),
             None => Value::Null,
@@ -660,12 +657,10 @@ fn run_test_case<F: FnMut()>(
             "status" => status.as_str(),
             "origin" => origin_value
         };
-        // Wait for server to acknowledge mark_complete before closing
-        let _ = data.channel.request_cbor(&mark_complete);
-        let _ = data.channel.close();
+        tc.send_mark_complete(&mark_complete);
     }
 
-    clear_test_case_data();
+    set_in_test_context(false);
 }
 
 /// Extract a message from a panic payload.

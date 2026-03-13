@@ -1,7 +1,7 @@
 use super::{
     booleans, collections::ArrayGenerator, floats, hashmaps, integers, optional, text, vecs,
-    BoolGenerator, FloatGenerator, HashMapGenerator, IntegerGenerator, OptionalGenerator,
-    TextGenerator, VecGenerator,
+    BoolGenerator, BoxedGenerator, FloatGenerator, Generator, HashMapGenerator, IntegerGenerator,
+    OptionalGenerator, TextGenerator, VecGenerator,
 };
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -10,39 +10,39 @@ use std::hash::Hash;
 ///
 /// This is used by derive macros to automatically generate values for fields.
 pub trait DefaultGenerator: Sized {
-    type Generator: super::Generate<Self>;
+    type Generator: super::Generator<Self> + 'static;
     fn default_generator() -> Self::Generator;
 }
 
 /// Create a generator for a type using its default generator.
 ///
 /// This is the primary way to get a generator for types that implement
-/// [`DefaultGenerator`], including types with `#[derive(Generate)]`.
+/// [`DefaultGenerator`], including types with `#[derive(Generator)]`.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use hegel::generators;
-/// use hegel::Generate;
+/// use hegel::generators::{self, DefaultGenerator};
+/// use hegel::Generator;
 ///
-/// #[derive(Generate, Debug)]
+/// #[derive(Generator, Debug)]
 /// struct Person {
 ///     name: String,
 ///     age: u32,
 /// }
 ///
 /// #[hegel::test]
-/// fn my_test() {
+/// fn my_test(tc: hegel::TestCase) {
 ///     // Generate with defaults
-///     let person: Person = hegel::draw(&generators::from_type::<Person>());
+///     let person: Person = tc.draw(generators::default::<Person>());
 ///
 ///     // Customize field generators
-///     let person: Person = hegel::draw(&generators::from_type::<Person>()
+///     let person: Person = tc.draw(generators::default::<Person>()
 ///         .with_age(generators::integers().min_value(0).max_value(120)));
 /// }
 /// ```
-pub fn from_type<T: DefaultGenerator>() -> T::Generator {
-    T::default_generator()
+pub fn default<T: DefaultGenerator>() -> BoxedGenerator<'static, T> {
+    T::default_generator().boxed()
 }
 
 impl DefaultGenerator for bool {
@@ -157,7 +157,7 @@ impl DefaultGenerator for f64 {
     }
 }
 
-impl<T: DefaultGenerator> DefaultGenerator for Option<T>
+impl<T: DefaultGenerator + 'static> DefaultGenerator for Option<T>
 where
     T::Generator: Send + Sync,
 {
@@ -167,7 +167,7 @@ where
     }
 }
 
-impl<T: DefaultGenerator> DefaultGenerator for Vec<T>
+impl<T: DefaultGenerator + 'static> DefaultGenerator for Vec<T>
 where
     T::Generator: Send + Sync,
 {
@@ -177,7 +177,7 @@ where
     }
 }
 
-impl<T: DefaultGenerator, const N: usize> DefaultGenerator for [T; N]
+impl<T: DefaultGenerator + 'static, const N: usize> DefaultGenerator for [T; N]
 where
     T::Generator: Send + Sync,
 {
@@ -187,7 +187,8 @@ where
     }
 }
 
-impl<K: DefaultGenerator, V: DefaultGenerator> DefaultGenerator for HashMap<K, V>
+impl<K: DefaultGenerator + 'static, V: DefaultGenerator + 'static> DefaultGenerator
+    for HashMap<K, V>
 where
     K: Eq + Hash,
     K::Generator: Send + Sync,
@@ -203,7 +204,7 @@ where
 ///
 /// This macro creates a hidden generator struct with builder methods for each field,
 /// and implements [`DefaultGenerator`](crate::generators::DefaultGenerator) for the type
-/// so it can be used with [`from_type`](crate::generators::from_type).
+/// so it can be used with [`default`](crate::generators::default).
 ///
 /// # Example
 ///
@@ -216,7 +217,7 @@ where
 ///
 /// // In your tests:
 /// use hegel::derive_generator;
-/// use hegel::generators::{self, Generate};
+/// use hegel::generators::{self, DefaultGenerator, Generator};
 /// use production_crate::Person;
 ///
 /// derive_generator!(Person {
@@ -224,12 +225,12 @@ where
 ///     age: u32,
 /// });
 ///
-/// // from_type now supports Person:
-/// let gen = generators::from_type::<Person>()
+/// // default now supports Person:
+/// let gen = generators::default::<Person>()
 ///     .with_name(generators::from_regex("[A-Z][a-z]+"))
 ///     .with_age(generators::integers::<u32>().min_value(0).max_value(120));
 ///
-/// let person: Person = hegel::draw(&gen);
+/// let person: Person = tc.draw(gen);
 /// ```
 #[macro_export]
 macro_rules! derive_generator {
@@ -248,7 +249,7 @@ macro_rules! derive_generator {
                         $($field_type: $crate::generators::DefaultGenerator,)*
                         $(<$field_type as $crate::generators::DefaultGenerator>::Generator: Send + Sync + 'a,)*
                     {
-                        use $crate::generators::{DefaultGenerator, Generate};
+                        use $crate::generators::{DefaultGenerator, Generator};
                         Self {
                             $($field_name: <$field_type as DefaultGenerator>::default_generator().boxed(),)*
                         }
@@ -257,9 +258,9 @@ macro_rules! derive_generator {
                     $(
                         pub fn [<with_ $field_name>]<G>(mut self, gen: G) -> Self
                         where
-                            G: $crate::generators::Generate<$field_type> + Send + Sync + 'a,
+                            G: $crate::generators::Generator<$field_type> + Send + Sync + 'a,
                         {
-                            use $crate::generators::Generate;
+                            use $crate::generators::Generator;
                             self.$field_name = gen.boxed();
                             self
                         }
@@ -276,9 +277,9 @@ macro_rules! derive_generator {
                     }
                 }
 
-                impl<'a> $crate::generators::Generate<$struct_name> for [<$struct_name Generator>]<'a> {
-                    fn do_draw(&self, __data: &$crate::generators::TestCaseData) -> $struct_name {
-                        use $crate::generators::Generate;
+                impl<'a> $crate::generators::Generator<$struct_name> for [<$struct_name Generator>]<'a> {
+                    fn do_draw(&self, __data: &$crate::TestCase) -> $struct_name {
+                        use $crate::generators::Generator;
                         $struct_name {
                             $($field_name: self.$field_name.do_draw(__data),)*
                         }
