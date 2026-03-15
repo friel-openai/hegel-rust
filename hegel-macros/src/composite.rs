@@ -34,8 +34,8 @@ pub fn expand_composite(
     let tc_type = &tc_arg.ty;
 
     // Check if the type path for the first parameter ends with a "TestCase" identifier. As far as
-    // I can tell, there's no good way of checking at procedural macro expansion time whether this
-    // actually resolves to the right type.
+    // I can tell, there's no good way of checking at macro expansion time whether this actually
+    // resolves to the right type.
     let Type::Path(path) = tc_type.as_ref() else {
         panic!("{}", MISSING_TEST_CASE_PARAMETER)
     };
@@ -52,20 +52,20 @@ pub fn expand_composite(
         -> ::hegel::generators::ComposedGenerator<#return_type, impl Fn(::hegel::TestCase) -> #return_type>
     };
 
-    let mut sig = f.sig;
-    sig.output = parse2(composed_generator_type).unwrap();
-    sig.inputs = passthrough
+    let mut signature = f.sig;
+    signature.output = parse2(composed_generator_type).unwrap();
+    signature.inputs = passthrough
         .iter()
         .cloned()
         .collect::<Punctuated<FnArg, Comma>>();
 
     let body = &f.block;
-    let attrs = &f.attrs;
-    let vis = &f.vis;
+    let attributes = &f.attrs;
+    let visibility = &f.vis;
 
     quote! {
-        #(#attrs)*
-        #vis #sig
+        #(#attributes)*
+        #visibility #signature
         { ::hegel::compose!(|#tc_pattern| #body) }
     }
 }
