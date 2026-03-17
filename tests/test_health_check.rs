@@ -1,6 +1,15 @@
 mod common;
 
 use common::project::TempRustProject;
+use hegel::HealthCheck;
+use hegel::TestCase;
+use hegel::generators;
+
+#[hegel::test(suppress_health_check = HealthCheck::FilterTooMuch)]
+fn test_suppress_filter_via_macro(tc: TestCase) {
+    let _: i32 = tc.draw(generators::integers().min_value(0).max_value(100));
+    tc.assume(false);
+}
 
 #[test]
 fn test_filter_too_much_fails() {
