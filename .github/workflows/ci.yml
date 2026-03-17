@@ -190,6 +190,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # id-token: "enables the workflow to request and use an OIDC token from GitHub's OIDC provider".
+      # Used by our trusted publishing flow
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -222,3 +225,39 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python .github/scripts/release.py release
+
+      - name: Install Rust
+        if: steps.check.outputs.skip != 'true'
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Authenticate with crates.io
+        if: steps.check.outputs.skip != 'true'
+        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1.0.3
+        id: crates-io-auth
+
+      - name: Publish hegeltest-macros
+        if: steps.check.outputs.skip != 'true'
+        run: cargo publish -p hegeltest-macros
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+
+      - name: Wait for crates.io index
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          VERSION=$(grep '^version' hegel-macros/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "Waiting for hegeltest-macros $VERSION to appear on crates.io..."
+          for i in $(seq 1 60); do
+            if cargo search hegeltest-macros | grep -q "\"$VERSION\""; then
+              echo "Found!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for crates.io index"
+          exit 1
+
+      - name: Publish hegeltest
+        if: steps.check.outputs.skip != 'true'
+        run: cargo publish -p hegeltest
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}

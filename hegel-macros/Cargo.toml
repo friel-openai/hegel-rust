@@ -1,8 +1,8 @@
 [package]
 name = "hegeltest-macros"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.68"
+edition = "2024"
+rust-version = "1.86"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/hegeldev/hegel-rust"

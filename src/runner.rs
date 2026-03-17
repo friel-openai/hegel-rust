@@ -1,6 +1,6 @@
 use crate::control::{currently_in_test_context, set_in_test_context};
 use crate::protocol::{Channel, Connection, HANDSHAKE_STRING};
-use crate::test_case::{TestCase, ASSUME_FAIL_STRING};
+use crate::test_case::{ASSUME_FAIL_STRING, TestCase};
 use ciborium::Value;
 
 use crate::cbor_utils::{as_bool, as_text, as_u64, cbor_map, map_get};
@@ -8,7 +8,7 @@ use std::backtrace::{Backtrace, BacktraceStatus};
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::os::unix::net::UnixStream;
-use std::panic::{self, catch_unwind, AssertUnwindSafe};
+use std::panic::{self, AssertUnwindSafe, catch_unwind};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
@@ -634,7 +634,9 @@ fn run_test_case<F: FnMut(TestCase)>(
                         let formatted = format_backtrace(&backtrace, is_full);
                         eprintln!("stack backtrace:\n{}", formatted);
                         if !is_full {
-                            eprintln!("note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.");
+                            eprintln!(
+                                "note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace."
+                            );
                         }
                     }
                 }
