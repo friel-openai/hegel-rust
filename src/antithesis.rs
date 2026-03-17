@@ -73,7 +73,7 @@ pub(crate) fn emit_assertion(location: &TestLocation, passed: bool) {
         .create(true)
         .append(true)
         .open(&path)
-        .expect(&format!("failed to open {}", path));
+        .unwrap_or_else(|_| panic!("failed to open {}", path));
     writeln!(file, "{}", serde_json::to_string(&declaration).unwrap()).unwrap();
     writeln!(file, "{}", serde_json::to_string(&evaluation).unwrap()).unwrap();
 }
