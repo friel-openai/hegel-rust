@@ -53,11 +53,11 @@ fn test_failing_test_output_with_backtrace() {
     //   stack backtrace:
     //      0: __rustc::rust_begin_unwind
     //      1: core::panicking::panic_fmt
-    //      2: temp_hegel_test::main::{{closure}}
+    //      2: temp_hegel_test_N::main::{{closure}}
     //      ...
     //      N: hegel::runner::handle_connection
     //      ...
-    //      M: temp_hegel_test::main
+    //      M: temp_hegel_test_N::main
     //      ...
     //   note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
     let expected = Regex::new(concat!(
@@ -70,11 +70,11 @@ fn test_failing_test_output_with_backtrace() {
         r".*",
         r"\s+1: core::panicking::panic_fmt\n", // frame 1: panic_fmt
         r".*",
-        r"\s+2: temp_hegel_test::main::\{\{closure\}\}\n", // frame 2: user's closure
+        r"\s+2: temp_hegel_test_\d+::main::\{\{closure\}\}\n", // frame 2: user's closure
         r".*",
         r"hegel::runner::", // hegel internals appear
         r".*",
-        r"temp_hegel_test::main\n", // user's main (not closure)
+        r"temp_hegel_test_\d+::main\n", // user's main (not closure)
         r".*",
         r"note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace\.",
     ))
@@ -102,11 +102,11 @@ fn test_failing_test_output_with_full_backtrace() {
         r"stack backtrace:\n",
         r"\s+0: .*\n", // starts at frame 0
         r".*",
-        r"temp_hegel_test::main::\{\{closure\}\}", // user's closure
+        r"temp_hegel_test_\d+::main::\{\{closure\}\}", // user's closure
         r".*",
         r"hegel::runner::", // hegel internals
         r".*",
-        r"temp_hegel_test::main\n", // user's main
+        r"temp_hegel_test_\d+::main\n", // user's main
         r".*$",
     ))
     .unwrap();
