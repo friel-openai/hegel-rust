@@ -64,12 +64,12 @@ use syn::{Data, DeriveInput, ItemFn, parse_macro_input};
 /// }
 /// ```
 #[proc_macro_derive(Generator)]
-pub fn derive_generate(input: TokenStream) -> TokenStream {
+pub fn derive_generator(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     match &input.data {
-        Data::Struct(data) => struct_gen::derive_struct_generate(&input, data),
-        Data::Enum(data) => enum_gen::derive_enum_generate(&input, data),
+        Data::Struct(data) => struct_gen::derive_struct_generator(&input, data),
+        Data::Enum(data) => enum_gen::derive_enum_generator(&input, data),
         Data::Union(_) => syn::Error::new_spanned(&input, "Generator cannot be derived for unions")
             .to_compile_error()
             .into(),

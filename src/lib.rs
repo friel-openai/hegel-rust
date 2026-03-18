@@ -232,4 +232,4 @@ pub use test_case::{__IsTestCase, __assert_is_test_case, generate_from_schema, g
 pub use hegel_macros::Generator;
 pub use hegel_macros::composite;
 pub use hegel_macros::test;
-pub use runner::{Hegel, Verbosity, hegel};
+pub use runner::{HealthCheck, HealthCheckList, Hegel, Verbosity, hegel};

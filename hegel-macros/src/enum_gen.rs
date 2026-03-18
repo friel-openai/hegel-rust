@@ -70,7 +70,7 @@ fn variant_field_types(variant: &Variant) -> Vec<&syn::Type> {
 }
 
 /// Derive Generator for an enum.
-pub(crate) fn derive_enum_generate(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
+pub(crate) fn derive_enum_generator(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
     let enum_name = &input.ident;
     let generator_name = format_ident!("{}Generator", enum_name);
 
