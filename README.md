@@ -7,7 +7,7 @@
 
 ## Installation
 
-In your `Cargo.toml`:
+Add `hegel-rust` to your `Cargo.toml` as a dev dependency:
 
 ```toml
 [dev-dependencies]
@@ -19,7 +19,7 @@ Hegel requires either:
 * [`uv`](https://docs.astral.sh/uv/) on your system,
 * or `HEGEL_SERVER_COMMAND` set to the path of a hegel-core binary.
 
-## Quick Start
+## Quickstart
 
 ```rust
 use hegel::generators;
