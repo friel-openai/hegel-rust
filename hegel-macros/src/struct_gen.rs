@@ -5,7 +5,7 @@ use syn::{DeriveInput, Fields};
 use crate::utils::{cbor_to_iter, default_gen_bounds, tuple_schema};
 
 /// Derive Generator for a struct.
-pub(crate) fn derive_struct_generate(input: &DeriveInput, data: &syn::DataStruct) -> TokenStream {
+pub(crate) fn derive_struct_generator(input: &DeriveInput, data: &syn::DataStruct) -> TokenStream {
     let name = &input.ident;
     let generator_name = format_ident!("{}Generator", name);
 
