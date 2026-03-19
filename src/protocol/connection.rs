@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::channel::Channel;
@@ -11,6 +11,7 @@ pub struct Connection {
     pending_packets: Mutex<HashMap<u32, VecDeque<Packet>>>,
     next_channel_id: AtomicU32,
     channels: Mutex<HashMap<u32, ()>>,
+    server_exited: AtomicBool,
 }
 
 impl Connection {
@@ -21,6 +22,7 @@ impl Connection {
             // channel 0 is reserved for the control channel
             next_channel_id: AtomicU32::new(1),
             channels: Mutex::new(HashMap::new()),
+            server_exited: AtomicBool::new(false),
         })
     }
 
@@ -41,9 +43,28 @@ impl Connection {
         Channel::new(channel_id, Arc::clone(self))
     }
 
+    pub fn mark_server_exited(&self) {
+        self.server_exited.store(true, Ordering::SeqCst);
+    }
+
+    pub fn server_has_exited(&self) -> bool {
+        self.server_exited.load(Ordering::SeqCst)
+    }
+
+    fn server_crashed_error() -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::ConnectionAborted,
+            super::SERVER_CRASHED_MESSAGE,
+        )
+    }
+
     pub fn send_packet(&self, packet: &Packet) -> std::io::Result<()> {
         let mut stream = self.stream.lock().unwrap();
-        write_packet(&mut *stream, packet)
+        match write_packet(&mut *stream, packet) {
+            Ok(()) => Ok(()),
+            Err(_) if self.server_has_exited() => Err(Self::server_crashed_error()),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn receive_packet_for_channel(&self, channel_id: u32) -> std::io::Result<Packet> {
@@ -61,7 +82,13 @@ impl Connection {
         loop {
             let packet = {
                 let mut stream = self.stream.lock().unwrap();
-                read_packet(&mut *stream)?
+                match read_packet(&mut *stream) {
+                    Ok(p) => p,
+                    Err(_) if self.server_has_exited() => {
+                        return Err(Self::server_crashed_error());
+                    }
+                    Err(e) => return Err(e),
+                }
             };
 
             if packet.channel == channel_id {

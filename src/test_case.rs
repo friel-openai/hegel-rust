@@ -1,6 +1,6 @@
 use crate::cbor_utils::{cbor_map, map_insert};
 use crate::generators::Generator;
-use crate::protocol::{Channel, Connection};
+use crate::protocol::{Channel, Connection, SERVER_CRASHED_MESSAGE};
 use crate::runner::Verbosity;
 use ciborium::Value;
 use std::cell::RefCell;
@@ -253,6 +253,8 @@ impl TestCase {
                     // error in the test_done results, which runner.rs handles.
                     self.inner.borrow_mut().test_aborted = true;
                     Err(StopTestError)
+                } else if self.inner.borrow().connection.server_has_exited() {
+                    panic!("{}", SERVER_CRASHED_MESSAGE);
                 } else {
                     panic!("Failed to communicate with Hegel: {}", e);
                 }
