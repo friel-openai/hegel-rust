@@ -44,13 +44,14 @@ where
     T: serde::de::DeserializeOwned + serde::Serialize + Bounded + NumInteger + Send + Sync + Copy,
 {
     fn do_draw(&self, tc: &TestCase) -> T {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            self.build_schema(),
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -183,13 +184,14 @@ where
     T: serde::de::DeserializeOwned + serde::Serialize + NumFloat + Send + Sync,
 {
     fn do_draw(&self, tc: &TestCase) -> T {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            self.build_schema(),
+            super::deserialize_value,
+        ))
     }
 }
 

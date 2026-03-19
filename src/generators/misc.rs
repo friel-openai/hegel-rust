@@ -11,8 +11,8 @@ pub struct JustGenerator<T> {
 }
 
 impl<T: Clone + Send + Sync> Generator<T> for JustGenerator<T> {
-    fn do_draw(&self, _tc: &TestCase) -> T {
-        self.value.clone()
+    fn do_draw(&self, tc: &TestCase) -> T {
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, T>> {
@@ -33,8 +33,8 @@ pub struct NoneGenerator<T> {
 }
 
 impl<T: Send + Sync> Generator<Option<T>> for NoneGenerator<T> {
-    fn do_draw(&self, _tc: &TestCase) -> Option<T> {
-        None
+    fn do_draw(&self, tc: &TestCase) -> Option<T> {
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, Option<T>>> {
@@ -55,7 +55,7 @@ pub struct BoolGenerator;
 
 impl Generator<bool> for BoolGenerator {
     fn do_draw(&self, tc: &TestCase) -> bool {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "boolean"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, bool>> {

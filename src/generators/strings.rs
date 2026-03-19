@@ -38,13 +38,14 @@ impl TextGenerator {
 
 impl Generator<String> for TextGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            self.build_schema(),
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -78,13 +79,14 @@ impl RegexGenerator {
 
 impl Generator<String> for RegexGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            self.build_schema(),
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -141,7 +143,7 @@ fn parse_binary(raw: Value) -> Vec<u8> {
 
 impl Generator<Vec<u8>> for BinaryGenerator {
     fn do_draw(&self, tc: &TestCase) -> Vec<u8> {
-        parse_binary(super::generate_raw(tc, &self.build_schema()))
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, Vec<u8>>> {
@@ -173,13 +175,14 @@ pub struct EmailGenerator;
 
 impl Generator<String> for EmailGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "email"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(cbor_map! {"type" => "email"}, |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            cbor_map! {"type" => "email"},
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -191,13 +194,14 @@ pub struct UrlGenerator;
 
 impl Generator<String> for UrlGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "url"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(cbor_map! {"type" => "url"}, |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            cbor_map! {"type" => "url"},
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -230,13 +234,14 @@ impl DomainGenerator {
 
 impl Generator<String> for DomainGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            self.build_schema(),
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -264,30 +269,50 @@ impl IpAddressGenerator {
         self.version = Some(IpVersion::V6);
         self
     }
-
-    fn build_schema(&self) -> Value {
-        match self.version {
-            Some(IpVersion::V4) => cbor_map! {"type" => "ipv4"},
-            Some(IpVersion::V6) => cbor_map! {"type" => "ipv6"},
-            None => cbor_map! {
-                "one_of" => cbor_array![
-                    cbor_map!{"type" => "ipv4"},
-                    cbor_map!{"type" => "ipv6"}
-                ]
-            },
-        }
-    }
 }
 
 impl Generator<String> for IpAddressGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &self.build_schema())
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(self.build_schema(), |raw| {
-            super::deserialize_value(raw)
-        }))
+        match self.version {
+            Some(IpVersion::V4) => Some(BasicGenerator::new(
+                cbor_map! {"type" => "ipv4"},
+                super::deserialize_value,
+            )),
+            Some(IpVersion::V6) => Some(BasicGenerator::new(
+                cbor_map! {"type" => "ipv6"},
+                super::deserialize_value,
+            )),
+            None => {
+                let schema = cbor_map! {
+                    "one_of" => cbor_array![
+                        cbor_map!{
+                            "type" => "tuple",
+                            "elements" => cbor_array![
+                                cbor_map!{"const" => Value::Integer(0.into())},
+                                cbor_map!{"type" => "ipv4"}
+                            ]
+                        },
+                        cbor_map!{
+                            "type" => "tuple",
+                            "elements" => cbor_array![
+                                cbor_map!{"const" => Value::Integer(1.into())},
+                                cbor_map!{"type" => "ipv6"}
+                            ]
+                        }
+                    ]
+                };
+                Some(BasicGenerator::new(schema, |raw| {
+                    let Value::Array(arr) = raw else {
+                        panic!("Expected array from tagged one_of, got {:?}", raw)
+                    };
+                    super::deserialize_value(arr.into_iter().nth(1).unwrap())
+                }))
+            }
+        }
     }
 }
 
@@ -299,13 +324,14 @@ pub struct DateGenerator;
 
 impl Generator<String> for DateGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "date"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(cbor_map! {"type" => "date"}, |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            cbor_map! {"type" => "date"},
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -317,13 +343,14 @@ pub struct TimeGenerator;
 
 impl Generator<String> for TimeGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "time"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
-        Some(BasicGenerator::new(cbor_map! {"type" => "time"}, |raw| {
-            super::deserialize_value(raw)
-        }))
+        Some(BasicGenerator::new(
+            cbor_map! {"type" => "time"},
+            super::deserialize_value,
+        ))
     }
 }
 
@@ -335,7 +362,7 @@ pub struct DateTimeGenerator;
 
 impl Generator<String> for DateTimeGenerator {
     fn do_draw(&self, tc: &TestCase) -> String {
-        super::generate_from_schema(tc, &cbor_map! {"type" => "datetime"})
+        self.as_basic().unwrap().do_draw(tc)
     }
 
     fn as_basic(&self) -> Option<BasicGenerator<'_, String>> {
