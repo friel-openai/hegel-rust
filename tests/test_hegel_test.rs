@@ -1,17 +1,60 @@
 mod common;
 
 use common::project::TempRustProject;
+use common::utils::expect_panic;
 use hegel::TestCase;
 use hegel::generators;
 
 #[hegel::test]
 fn test_basic_usage(tc: TestCase) {
-    let _ = tc.draw(generators::booleans());
+    tc.draw(generators::booleans());
 }
 
 #[hegel::test(test_cases = 10)]
-fn test_with_settings(tc: TestCase) {
-    let _ = tc.draw(generators::booleans());
+fn test_with_named_arg(tc: TestCase) {
+    tc.draw(generators::booleans());
+}
+
+#[hegel::test(hegel::Settings::new().test_cases(10))]
+fn test_with_positional_settings(tc: TestCase) {
+    tc.draw(generators::booleans());
+}
+
+#[hegel::test(hegel::Settings::new(), test_cases = 10)]
+fn test_with_positional_and_named(tc: TestCase) {
+    tc.draw(generators::booleans());
+}
+
+#[hegel::test(test_cases = 10, derandomize = true)]
+fn test_with_multiple_named_args(tc: TestCase) {
+    tc.draw(generators::booleans());
+}
+
+#[hegel::test(seed = Some(42))]
+fn test_with_seed(tc: TestCase) {
+    tc.draw(generators::booleans());
+}
+
+#[test]
+fn test_database_persists_failing_examples() {
+    let db_path = tempfile::tempdir().unwrap();
+    let db_str = db_path.path().to_str().unwrap().to_string();
+
+    assert!(std::fs::read_dir(db_path.path()).unwrap().next().is_none());
+
+    expect_panic(|| {
+        hegel::Hegel::new(|_tc: hegel::TestCase| {
+            panic!("");
+        })
+        .settings(hegel::Settings::new().database(Some(db_str)))
+        .__database_key("test_database_persists".to_string())
+        .run();
+    }, "Property test failed");
+
+    let entries: Vec<_> = std::fs::read_dir(db_path.path())
+        .unwrap()
+        .collect();
+    assert!(!entries.is_empty());
 }
 
 #[test]
@@ -42,7 +85,7 @@ use hegel::generators;
 fn main() {
 }
 "#;
-    let output = TempRustProject::new(code_zero).run();
+    let output = TempRustProject::new(code_zero).cargo_run(&[]);
     assert!(!output.status.success());
     assert!(
         output

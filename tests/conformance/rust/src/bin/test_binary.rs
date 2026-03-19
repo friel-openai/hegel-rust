@@ -1,5 +1,5 @@
 use hegel::generators;
-use hegel::Hegel;
+use hegel::{Hegel, Settings};
 use hegel_conformance::{get_test_cases, write};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -37,6 +37,6 @@ fn main() {
             length: value.len(),
         });
     })
-    .test_cases(get_test_cases())
+    .settings(Settings::new().test_cases(get_test_cases()))
     .run();
 }
