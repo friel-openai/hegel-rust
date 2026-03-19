@@ -168,13 +168,6 @@ fn ensure_hegel_installed() -> Result<String, String> {
     let hegel_bin = format!("{venv_dir}/bin/hegel");
     let install_log = format!("{HEGEL_SERVER_DIR}/install.log");
 
-    // Check cached version
-    if let Ok(cached) = std::fs::read_to_string(&version_file) {
-        if cached.trim() == HEGEL_SERVER_VERSION && std::path::Path::new(&hegel_bin).is_file() {
-            return Ok(hegel_bin);
-        }
-    }
-
     std::fs::create_dir_all(HEGEL_SERVER_DIR)
         .map_err(|e| format!("Failed to create {HEGEL_SERVER_DIR}: {e}"))?;
 
@@ -439,6 +432,17 @@ where
         let socket_path = temp_dir.path().join("hegel.sock");
 
         let hegel_binary_path = find_hegel();
+
+        // Check hegel core version.
+        let hegel_version_response = std::process::Command::new(&hegel_binary_path)
+            .arg("--version")
+            .output()
+            .expect("Failed to check hegel server version.");
+        let hegel_version_string = String::from_utf8_lossy(&hegel_version_response.stdout);
+        if hegel_version_string.trim() != format!("hegel (version {HEGEL_SERVER_VERSION})") {
+            panic!("Incorrect hegel server version (expected {HEGEL_SERVER_VERSION}).");
+        }
+
         let mut cmd = Command::new(&hegel_binary_path);
         cmd.arg(&socket_path)
             .arg("--verbosity")
