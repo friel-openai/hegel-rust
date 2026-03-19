@@ -16,7 +16,9 @@ fn main() {
 
 #[test]
 fn test_failing_test_output() {
-    let output = TempRustProject::new().main_file(FAILING_TEST_CODE).cargo_run(&[]);
+    let output = TempRustProject::new()
+        .main_file(FAILING_TEST_CODE)
+        .cargo_run(&[]);
     assert!(!output.status.success());
 
     // For example:
