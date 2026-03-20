@@ -34,15 +34,15 @@ fn record_test_case(label: &str, n: i64) {{
 }}
 
 #[hegel::test(database = Some("{db_str}".to_string()))]
-fn test_1() {{
-    let n: i64 = hegel::draw(&generators::integers());
+fn test_1(tc: hegel::TestCase) {{
+    let n: i64 = tc.draw(generators::integers());
     record_test_case("test_1", n);
     assert!(n < 1_000_000);
 }}
 
 #[hegel::test(database = Some("{db_str}".to_string()))]
-fn test_2() {{
-    let n: i64 = hegel::draw(&generators::integers());
+fn test_2(tc: hegel::TestCase) {{
+    let n: i64 = tc.draw(generators::integers());
     record_test_case("test_2", n);
     assert!(n < 1_000_000);
 }}
