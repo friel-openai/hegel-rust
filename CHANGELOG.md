@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.10 - 2026-03-20
+
+Adds support for the on-disk database, which automatically replays failing test.
+
+Also adds the `hegel::Settings` struct to encapsulate settings.
+
 ## 0.1.9 - 2026-03-19
 
 This patch bumps the minimum supported protocol version to 0.6.
