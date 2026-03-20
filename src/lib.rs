@@ -235,4 +235,4 @@ pub use antithesis::TestLocation;
 pub use hegel_macros::Generator;
 pub use hegel_macros::composite;
 pub use hegel_macros::test;
-pub use runner::{HealthCheck, Hegel, Verbosity, hegel};
+pub use runner::{HealthCheck, Hegel, Settings, Verbosity, hegel};

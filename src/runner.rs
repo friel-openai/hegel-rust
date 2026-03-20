@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 use tempfile::TempDir;
 
-const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.6, 0.6);
-const HEGEL_SERVER_VERSION: &str = "0.2.1";
+const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.6, 0.7);
+const HEGEL_SERVER_VERSION: &str = "0.2.2";
 const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
 static HEGEL_SERVER_COMMAND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -343,41 +343,73 @@ where
 
 /// Builder for running property-based tests with Hegel.
 ///
-/// Use [`Hegel::new`] to create a builder, configure it with method chains,
-/// then call [`run`](Hegel::run) to execute the tests.
+/// Use [`Hegel::new`] to create a builder, then call [`run`](Hegel::run) to
+/// execute the tests. Use [`settings`](Hegel::settings) to customize test
+/// behavior via a [`Settings`] instance.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use hegel::Verbosity;
+/// use hegel::{Settings, Verbosity};
 /// use hegel::generators;
 ///
-/// #[hegel::test(test_cases = 500, verbosity = Verbosity::Verbose)]
+/// #[hegel::test(settings = Settings::new().test_cases(500).verbosity(Verbosity::Verbose))]
 /// fn test_with_options(tc: hegel::TestCase) {
 ///     let n = tc.draw(generators::integers::<i32>());
 ///     assert!(n + 0 == n);
 /// }
 /// ```
-pub struct Hegel<F> {
-    test_fn: F,
+fn is_in_ci() -> bool {
+    const CI_VARS: &[(&str, Option<&str>)] = &[
+        ("CI", None),
+        ("TF_BUILD", Some("true")),
+        ("BUILDKITE", Some("true")),
+        ("CIRCLECI", Some("true")),
+        ("CIRRUS_CI", Some("true")),
+        ("CODEBUILD_BUILD_ID", None),
+        ("GITHUB_ACTIONS", Some("true")),
+        ("GITLAB_CI", None),
+        ("HEROKU_TEST_RUN_ID", None),
+        ("TEAMCITY_VERSION", None),
+        ("bamboo.buildKey", None),
+    ];
+
+    CI_VARS.iter().any(|(key, value)| match value {
+        None => std::env::var_os(key).is_some(),
+        Some(expected) => std::env::var(key).ok().as_deref() == Some(expected),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Database {
+    Unset,
+    Disabled,
+    Path(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct Settings {
     test_cases: u64,
     verbosity: Verbosity,
     seed: Option<u64>,
-    test_location: Option<TestLocation>,
+    derandomize: bool,
+    database: Database,
     suppress_health_check: Vec<HealthCheck>,
 }
 
-impl<F> Hegel<F>
-where
-    F: FnMut(TestCase),
-{
-    pub fn new(test_fn: F) -> Self {
+impl Settings {
+    pub fn new() -> Self {
+        let in_ci = is_in_ci();
         Self {
-            test_fn,
             test_cases: 100,
             verbosity: Verbosity::Normal,
             seed: None,
-            test_location: None,
+            derandomize: in_ci,
+            database: if in_ci {
+                Database::Disabled
+            } else {
+                Database::Unset
+            },
             suppress_health_check: Vec::new(),
         }
     }
@@ -397,11 +429,19 @@ where
         self
     }
 
-    #[doc(hidden)]
-    pub fn test_location(mut self, location: TestLocation) -> Self {
-        self.test_location = Some(location);
+    pub fn derandomize(mut self, derandomize: bool) -> Self {
+        self.derandomize = derandomize;
         self
     }
+
+    pub fn database(mut self, database: Option<String>) -> Self {
+        self.database = match database {
+            None => Database::Disabled,
+            Some(path) => Database::Path(path),
+        };
+        self
+    }
+
     /// Suppress one or more health checks so they do not cause test failure.
     ///
     /// Health checks detect common issues like excessive filtering or slow
@@ -423,6 +463,50 @@ where
         self.suppress_health_check.extend(checks);
         self
     }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct Hegel<F> {
+    test_fn: F,
+    database_key: Option<String>,
+    test_location: Option<TestLocation>,
+    settings: Settings,
+}
+
+impl<F> Hegel<F>
+where
+    F: FnMut(TestCase),
+{
+    pub fn new(test_fn: F) -> Self {
+        Self {
+            test_fn,
+            database_key: None,
+            settings: Settings::new(),
+            test_location: None,
+        }
+    }
+
+    pub fn settings(mut self, settings: Settings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn __database_key(mut self, key: String) -> Self {
+        self.database_key = Some(key);
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn test_location(mut self, location: TestLocation) -> Self {
+        self.test_location = Some(location);
+        self
+    }
 
     /// Run the property-based tests.
     ///
@@ -442,7 +526,7 @@ where
         let mut cmd = Command::new(&hegel_binary_path);
         cmd.arg(&socket_path)
             .arg("--verbosity")
-            .arg(self.verbosity.as_str());
+            .arg(self.settings.verbosity.as_str());
 
         cmd.env("PYTHONUNBUFFERED", "1");
         let log_file = server_log_file();
@@ -452,7 +536,7 @@ where
         cmd.stdout(Stdio::from(log_file));
         cmd.stderr(Stdio::from(log_file2));
 
-        if self.verbosity == Verbosity::Debug {
+        if self.settings.verbosity == Verbosity::Debug {
             eprintln!("Starting hegel server: {:?}", cmd);
         }
 
@@ -538,7 +622,7 @@ where
             );
         }
 
-        if self.verbosity == Verbosity::Debug {
+        if self.settings.verbosity == Verbosity::Debug {
             eprintln!("Version negotiation complete");
         }
 
@@ -552,22 +636,39 @@ where
         });
 
         let mut test_fn = self.test_fn;
-        let verbosity = self.verbosity;
+        let verbosity = self.settings.verbosity;
         let got_interesting = Arc::new(AtomicBool::new(false));
         let test_channel = connection.new_channel();
 
         let suppress_names: Vec<Value> = self
+            .settings
             .suppress_health_check
             .iter()
             .map(|c| Value::Text(c.as_str().to_string()))
             .collect();
 
+        let database_key_bytes = self
+            .database_key
+            .map_or(Value::Null, |k| Value::Bytes(k.into_bytes()));
+
         let mut run_test_msg = cbor_map! {
             "command" => "run_test",
-            "test_cases" => self.test_cases,
-            "seed" => self.seed.map_or(Value::Null, Value::from),
-            "channel_id" => test_channel.channel_id
+            "test_cases" => self.settings.test_cases,
+            "seed" => self.settings.seed.map_or(Value::Null, Value::from),
+            "channel_id" => test_channel.channel_id,
+            "database_key" => database_key_bytes,
+            "derandomize" => self.settings.derandomize
         };
+        let db_value = match &self.settings.database {
+            Database::Unset => Option::None,
+            Database::Disabled => Some(Value::Null),
+            Database::Path(s) => Some(Value::Text(s.clone())),
+        };
+        if let Some(db) = db_value {
+            if let Value::Map(ref mut map) = run_test_msg {
+                map.push((Value::Text("database".to_string()), db));
+            }
+        }
         if !suppress_names.is_empty() {
             if let Value::Map(ref mut map) = run_test_msg {
                 map.push((

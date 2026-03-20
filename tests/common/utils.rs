@@ -1,11 +1,32 @@
 // internal helper code
 #![allow(dead_code)]
 
+use std::panic::{UnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
-use hegel::Hegel;
 use hegel::generators::Generator;
+use hegel::{Hegel, Settings};
+use regex::Regex;
 use std::fmt::Debug;
+
+pub fn assert_matches_regex(text: &str, pattern: &str) {
+    let re = Regex::new(pattern).unwrap_or_else(|e| panic!("invalid regex {pattern:?}: {e}"));
+    assert!(
+        re.is_match(text),
+        "Expected to match pattern: {pattern}\nActual:\n{text}"
+    );
+}
+
+/// Run `f` and assert it panics with a message matching the `pattern` regex.
+pub fn expect_panic<F: FnOnce() + UnwindSafe>(f: F, pattern: &str) {
+    let err = catch_unwind(f).expect_err("expected panic, but closure returned normally");
+    let msg = err
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| err.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    assert_matches_regex(&msg, pattern);
+}
 
 #[allow(dead_code)]
 pub fn check_can_generate_examples<T, G>(generator: G)
@@ -67,7 +88,7 @@ where
                 "Found value that does not match predicate"
             );
         })
-        .test_cases(self.test_cases)
+        .settings(Settings::new().test_cases(self.test_cases))
         .run();
     }
 }
@@ -171,7 +192,7 @@ where
                     panic!("HEGEL_FOUND"); // Early exit marker
                 }
             })
-            .test_cases(max_attempts)
+            .settings(Settings::new().test_cases(max_attempts))
             .run();
         }));
 

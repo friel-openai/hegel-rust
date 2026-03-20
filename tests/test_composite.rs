@@ -18,8 +18,7 @@ fn composite_integer_generator(tc: TestCase, n: i32) -> i32 {
 fn main() {}
 "#;
 
-    let output = TempRustProject::new().main_file(code).run();
-    assert!(output.status.success());
+    TempRustProject::new().main_file(code).cargo_run(&[]);
 }
 
 #[test]
@@ -36,15 +35,10 @@ fn composite_integer_generator(tc: TestCase, n: i32) {
 fn main() {}
 "#;
 
-    let output = TempRustProject::new().main_file(code).run();
-    assert!(!output.status.success());
-    assert!(
-        output
-            .stderr
-            .contains("must explicitly declare a return type"),
-        "Expected missing return type error, got: {}",
-        output.stderr
-    );
+    TempRustProject::new()
+        .main_file(code)
+        .expect_failure("must explicitly declare a return type")
+        .cargo_run(&[]);
 }
 
 #[test]
@@ -58,15 +52,10 @@ fn composite_integer_generator() -> i32 {
 fn main() {}
 "#;
 
-    let output = TempRustProject::new().main_file(code).run();
-    assert!(!output.status.success());
-    assert!(
-        output
-            .stderr
-            .contains("must define a first parameter of type TestCase"),
-        "Expected missing return type error, got: {}",
-        output.stderr
-    );
+    TempRustProject::new()
+        .main_file(code)
+        .expect_failure("must define a first parameter of type TestCase")
+        .cargo_run(&[]);
 }
 
 #[test]
@@ -80,13 +69,10 @@ fn composite_integer_generator(n: i32) -> i32 {
 fn main() {}
 "#;
 
-    let output = TempRustProject::new().main_file(code).run();
-    assert!(!output.status.success());
-    assert!(
-        output.stderr.contains("must have type TestCase"),
-        "Expected TestCase parameter error, got: {}",
-        output.stderr
-    );
+    TempRustProject::new()
+        .main_file(code)
+        .expect_failure("must have type TestCase")
+        .cargo_run(&[]);
 }
 
 #[hegel::composite]

@@ -1,6 +1,7 @@
 // internal helper code
 #![allow(dead_code)]
 
+use super::utils::assert_matches_regex;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus};
 use tempfile::TempDir;
@@ -10,8 +11,7 @@ pub struct TempRustProject {
     project_path: PathBuf,
     env_vars: Vec<(String, String)>,
     features: Vec<String>,
-    has_main: bool,
-    has_tests: bool,
+    expect_failure: Option<String>,
 }
 
 pub struct RunOutput {
@@ -41,25 +41,21 @@ impl TempRustProject {
             project_path,
             env_vars: Vec::new(),
             features: Vec::new(),
-            has_main: false,
-            has_tests: false,
+            expect_failure: None,
         }
     }
 
-    pub fn main_file(mut self, code: &str) -> Self {
-        assert!(!self.has_main, "main_file can only be called once");
+    pub fn main_file(self, code: &str) -> Self {
         let src_dir = self.project_path.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
         std::fs::write(src_dir.join("main.rs"), code).unwrap();
-        self.has_main = true;
         self
     }
 
-    pub fn test_file(mut self, code: &str) -> Self {
+    pub fn test_file(self, name: &str, content: &str) -> Self {
         let tests_dir = self.project_path.join("tests");
         std::fs::create_dir_all(&tests_dir).unwrap();
-        std::fs::write(tests_dir.join("test.rs"), code).unwrap();
-        self.has_tests = true;
+        std::fs::write(tests_dir.join(name), content).unwrap();
         self
     }
 
@@ -73,12 +69,12 @@ impl TempRustProject {
         self
     }
 
-    pub fn run(self) -> RunOutput {
-        assert!(
-            self.has_main || self.has_tests,
-            "TempRustProject needs at least a main_file or test_file"
-        );
+    pub fn expect_failure(mut self, pattern: &str) -> Self {
+        self.expect_failure = Some(pattern.to_string());
+        self
+    }
 
+    fn cargo(&self, args: &[&str]) -> RunOutput {
         let hegel_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let features = if self.features.is_empty() {
             String::new()
@@ -107,14 +103,7 @@ hegeltest = {{ path = "{path}"{features} }}
         std::fs::write(self.project_path.join("Cargo.toml"), cargo_toml).unwrap();
 
         let mut cmd = Command::new(env!("CARGO"));
-
-        if self.has_tests {
-            cmd.args(["test", "--quiet"]);
-        } else {
-            cmd.args(["run", "--quiet"]);
-        }
-
-        cmd.current_dir(&self.project_path);
+        cmd.args(args).current_dir(&self.project_path);
 
         for (key, value) in &self.env_vars {
             cmd.env(key, value);
@@ -122,10 +111,45 @@ hegeltest = {{ path = "{path}"{features} }}
 
         let output = cmd.output().unwrap();
 
-        RunOutput {
+        let run_output = RunOutput {
             status: output.status,
             stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        };
+
+        match &self.expect_failure {
+            None => {
+                assert!(
+                    run_output.status.success(),
+                    "Expected command to succeed.\nstdout:\n{}\nstderr:\n{}",
+                    run_output.stdout,
+                    run_output.stderr
+                );
+            }
+            Some(pattern) => {
+                assert!(
+                    !run_output.status.success(),
+                    "Expected command to fail.\nstdout:\n{}\nstderr:\n{}",
+                    run_output.stdout,
+                    run_output.stderr
+                );
+                let combined = format!("{}\n{}", run_output.stdout, run_output.stderr);
+                assert_matches_regex(&combined, pattern);
+            }
         }
+
+        run_output
+    }
+
+    pub fn cargo_run(&self, args: &[&str]) -> RunOutput {
+        let mut all = vec!["run", "--quiet"];
+        all.extend(args);
+        self.cargo(&all)
+    }
+
+    pub fn cargo_test(&self, args: &[&str]) -> RunOutput {
+        let mut all = vec!["test", "--quiet"];
+        all.extend(args);
+        self.cargo(&all)
     }
 }

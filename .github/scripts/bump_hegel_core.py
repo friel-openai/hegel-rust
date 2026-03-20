@@ -115,11 +115,11 @@ def bump(version: str) -> None:
     )
     has_open_pr = result.returncode == 0 and result.stdout.strip() not in ("", "[]")
 
-    title = f"Bump `hegel-core` to `{version}`"
+    title = f"Bump pinned `hegel-core` to `{version}`"
     bump_url = "https://github.com/hegeldev/hegel-rust/blob/main/.github/workflows/bump-hegel-core.yml"
     core_url = "https://github.com/hegeldev/hegel-core/blob/main/.github/workflows/ci.yml"
     body = (
-        f"This PR bumps our pinned `hegel-core` version to `{version}`.\n"
+        f"This PR bumps our pinned `hegel-core` version to `v{version}`.\n"
         "\n"
         "---\n"
         "\n"
