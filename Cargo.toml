@@ -22,12 +22,11 @@ name = "hegel"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-num = "0.4"
 paste = "1.0"
-hegeltest-macros = { version = "=0.1.11", path = "hegel-macros" }
 tempfile = "3.0"
 ciborium = "0.2"
 crc32fast = "1.4"
+hegeltest-macros = { version = "=0.1.11", path = "hegel-macros" }
 # optional feature dependencies
 rand = { version = "0.9", optional = true }
 serde_json = { version = "1.0", optional = true }
