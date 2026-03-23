@@ -28,7 +28,7 @@ jobs:
           ssh-key: ${{ secrets.HEGEL_DEPLOY_KEY }}
 
       - name: Install Rust
-        run: rustup toolchain install stable -c rustfmt -c clippy
+        run: rustup toolchain install stable --profile minimal -c rustfmt -c clippy
       - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
 
       - name: Check formatting
