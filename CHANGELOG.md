@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.14 - 2026-03-23
+
+Drop our dependency on the `num` crate.
+
 ## 0.1.13 - 2026-03-23
 
 Enable the `#![forbid(future_incompatible)]` and `#![cfg_attr(docsrs, feature(doc_cfg))]` attributes, the latter of which unblocks our docs.rs build.
