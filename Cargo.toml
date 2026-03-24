@@ -26,6 +26,11 @@ categories = ["development-tools::testing"]
 [lib]
 name = "hegel"
 
+# Required for rustdoc to know that we're okay with building examples.
+[[example]]
+name = "stack"
+doc-scrape-examples = true
+
 [dependencies]
 serde = { version = "1.0.103", features = ["derive"] }
 paste = "1.0"
@@ -50,3 +55,4 @@ antithesis = ["dep:serde_json"]
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
