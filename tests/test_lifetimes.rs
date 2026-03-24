@@ -27,7 +27,7 @@ fn test_tuple_of_references(tc: TestCase) {
     let ys = ["a", "b", "c"];
     let x_refs: Vec<&i32> = xs.iter().collect();
     let y_refs: Vec<&&str> = ys.iter().collect();
-    let (x, y): (&i32, &&str) = tc.draw(generators::tuples2(
+    let (x, y): (&i32, &&str) = tc.draw(generators::tuples!(
         generators::sampled_from(x_refs),
         generators::sampled_from(y_refs),
     ));
@@ -89,7 +89,7 @@ fn test_tuple3_of_references(tc: TestCase) {
     let xr: Vec<&i32> = xs.iter().collect();
     let yr: Vec<&&str> = ys.iter().collect();
     let zr: Vec<&bool> = zs.iter().collect();
-    let (x, y, z): (&i32, &&str, &bool) = tc.draw(generators::tuples3(
+    let (x, y, z): (&i32, &&str, &bool) = tc.draw(generators::tuples!(
         generators::sampled_from(xr),
         generators::sampled_from(yr),
         generators::sampled_from(zr),
@@ -105,7 +105,7 @@ fn test_nested_optional_tuple_of_references(tc: TestCase) {
     let ages = [25u32, 30, 35];
     let name_refs: Vec<&&str> = names.iter().collect();
     let age_refs: Vec<&u32> = ages.iter().collect();
-    let result: Option<(&&str, &u32)> = tc.draw(generators::optional(generators::tuples2(
+    let result: Option<(&&str, &u32)> = tc.draw(generators::optional(generators::tuples!(
         generators::sampled_from(name_refs),
         generators::sampled_from(age_refs),
     )));
@@ -122,7 +122,7 @@ fn test_vec_of_tuples_of_references(tc: TestCase) {
     let kr: Vec<&i32> = keys.iter().collect();
     let vr: Vec<&&str> = vals.iter().collect();
     let result: Vec<(&i32, &&str)> = tc.draw(
-        generators::vecs(generators::tuples2(
+        generators::vecs(generators::tuples!(
             generators::sampled_from(kr),
             generators::sampled_from(vr),
         ))
@@ -166,7 +166,7 @@ fn test_deeply_nested_reference_composition(tc: TestCase) {
 
     let result: Vec<i32> = tc.draw(
         generators::vecs(
-            generators::optional(generators::tuples2(
+            generators::optional(generators::tuples!(
                 generators::sampled_from(xr),
                 generators::sampled_from(yr),
             ))
