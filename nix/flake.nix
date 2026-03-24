@@ -16,14 +16,7 @@
       ...
     }:
     let
-      supportedSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
-      ];
-
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in
     {
       devShells = forAllSystems (
@@ -33,16 +26,15 @@
         in
         {
           default = pkgs.mkShell {
-            inputsFrom = [ hegel.packages.${system}.default ];
-            buildInputs = [
+            packages = [
               pkgs.cargo
               pkgs.rustc
               pkgs.rustfmt
               pkgs.clippy
+              pkgs.rust-analyzer
               pkgs.just
-              hegel.packages.${system}.default
             ];
-            HEGEL_SERVER_COMMAND = "${hegel.packages.${system}.default}/bin/hegel";
+            HEGEL_SERVER_COMMAND = pkgs.lib.getExe hegel.packages.${system}.default;
           };
         }
       );
