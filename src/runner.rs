@@ -268,9 +268,7 @@ fn find_hegel() -> String {
         return override_path;
     }
     HEGEL_SERVER_COMMAND
-        .get_or_init(|| {
-            ensure_hegel_installed().unwrap_or_else(|e| panic!("{e}"))
-        })
+        .get_or_init(|| ensure_hegel_installed().unwrap_or_else(|e| panic!("{e}")))
         .clone()
 }
 
