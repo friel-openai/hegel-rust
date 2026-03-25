@@ -8,16 +8,13 @@ use crate::cbor_utils::{as_bool, as_text, as_u64, cbor_map, map_get};
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
-use std::os::unix::net::UnixStream;
 use std::panic::{self, AssertUnwindSafe, catch_unwind};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
-use std::time::Duration;
-use tempfile::TempDir;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.6, 0.7);
-const HEGEL_SERVER_VERSION: &str = "0.2.2";
+const HEGEL_SERVER_VERSION: &str = "0.2.3";
 const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
 const UV_NOT_FOUND_MESSAGE: &str = "\
@@ -43,11 +40,10 @@ static PANIC_HOOK_INIT: Once = Once::new();
 
 /// A persistent connection to the hegel server subprocess.
 ///
-/// Created once per process on first use. The subprocess and socket connection
+/// Created once per process on first use. The subprocess and connection
 /// are reused across all `Hegel::run()` calls. The Python server supports
 /// multiple sequential `run_test` commands over a single connection.
 struct HegelSession {
-    _temp_dir: TempDir,
     connection: Arc<Connection>,
     /// The control channel is shared across threads, so it's behind a Mutex
     /// because Channel is not thread-safe. The lock is only held for the
@@ -65,67 +61,25 @@ impl HegelSession {
     }
 
     fn init() -> HegelSession {
-        let temp_dir = TempDir::new().expect("Failed to create temp directory");
-        let socket_path = temp_dir.path().join("hegel.sock");
-
         let hegel_binary_path = find_hegel();
         let mut cmd = Command::new(&hegel_binary_path);
-        cmd.arg(&socket_path).arg("--verbosity").arg("normal");
+        cmd.arg("--stdio").arg("--verbosity").arg("normal");
 
         cmd.env("PYTHONUNBUFFERED", "1");
         let log_file = server_log_file();
-        let log_file2 = log_file
-            .try_clone()
-            .expect("Failed to clone log file handle");
-        cmd.stdout(Stdio::from(log_file));
-        cmd.stderr(Stdio::from(log_file2));
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::from(log_file));
 
         #[allow(clippy::expect_fun_call)]
         let mut child = cmd
             .spawn()
             .expect(format!("Failed to spawn hegel at path {}", hegel_binary_path).as_str());
 
-        let mut attempts = 0;
-        let stream = loop {
-            if let Ok(Some(status)) = child.try_wait() {
-                panic!(
-                    "The hegel server process exited immediately ({}). \
-                     See .hegel/server.log for diagnostic information.",
-                    status
-                );
-            }
+        let child_stdin = child.stdin.take().expect("Failed to take child stdin");
+        let child_stdout = child.stdout.take().expect("Failed to take child stdout");
 
-            if socket_path.exists() {
-                match UnixStream::connect(&socket_path) {
-                    Ok(stream) => break stream,
-                    Err(_) if attempts < 50 => {
-                        std::thread::sleep(Duration::from_millis(100));
-                        attempts += 1;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = child.kill();
-                        panic!("Failed to connect to hegel server socket: {}", e);
-                    }
-                }
-            }
-            if attempts >= 50 {
-                let _ = child.kill();
-                panic!("Timeout waiting for hegel server to create socket");
-            }
-            std::thread::sleep(Duration::from_millis(100));
-            attempts += 1;
-        };
-
-        stream.set_read_timeout(Some(Duration::from_secs(120))).ok();
-
-        // Clone the stream before Connection takes ownership, so the monitor
-        // thread can shut it down if the server exits unexpectedly.
-        let monitor_stream = stream
-            .try_clone()
-            .expect("Failed to clone stream for server monitoring");
-
-        let connection = Connection::new(stream);
+        let connection = Connection::new(Box::new(child_stdout), Box::new(child_stdin));
         let mut control = connection.control_channel();
 
         // Handshake
@@ -159,17 +113,15 @@ impl HegelSession {
             );
         }
 
-        // Monitor thread: detects server crash and shuts down the socket
-        // so that blocking reads fail immediately.
+        // Monitor thread: detects server crash. The pipe close from
+        // the child exiting will unblock any pending reads.
         let conn_for_monitor = Arc::clone(&connection);
         std::thread::spawn(move || {
             let _ = child.wait();
             conn_for_monitor.mark_server_exited();
-            let _ = monitor_stream.shutdown(std::net::Shutdown::Both);
         });
 
         HegelSession {
-            _temp_dir: temp_dir,
             connection,
             control: Mutex::new(control),
         }

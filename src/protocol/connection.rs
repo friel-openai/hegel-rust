@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::os::unix::net::UnixStream;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -8,7 +8,7 @@ use super::channel::Channel;
 use super::packet::{Packet, read_packet, write_packet};
 
 pub struct Connection {
-    writer: Mutex<UnixStream>,
+    writer: Mutex<Box<dyn Write + Send>>,
     /// Per-channel packet senders. The background reader thread dispatches
     /// incoming packets to the appropriate channel's sender.
     channel_senders: Mutex<HashMap<u32, Sender<Packet>>>,
@@ -17,25 +17,21 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(stream: UnixStream) -> Arc<Self> {
-        let reader_stream = stream
-            .try_clone()
-            .expect("Failed to clone stream for reader thread");
-
+    pub fn new(mut reader: Box<dyn Read + Send>, writer: Box<dyn Write + Send>) -> Arc<Self> {
         let conn = Arc::new(Self {
-            writer: Mutex::new(stream),
+            writer: Mutex::new(writer),
             channel_senders: Mutex::new(HashMap::new()),
             // channel 0 is reserved for the control channel
             next_channel_id: AtomicU32::new(1),
             server_exited: AtomicBool::new(false),
         });
 
-        // Background reader thread: reads all packets from the socket and
+        // Background reader thread: reads all packets from the stream and
         // dispatches them to the appropriate channel's receiver queue.
         let conn_for_reader = Arc::clone(&conn);
         std::thread::spawn(move || {
             loop {
-                match read_packet(&mut &reader_stream) {
+                match read_packet(&mut reader) {
                     Ok(packet) => {
                         let senders = conn_for_reader.channel_senders.lock().unwrap();
                         if let Some(sender) = senders.get(&packet.channel) {
@@ -46,7 +42,7 @@ impl Connection {
                         // Packets for unknown channels are silently dropped.
                     }
                     Err(_) => {
-                        // Socket closed or error — mark server as exited and stop.
+                        // Stream closed or error — mark server as exited and stop.
                         conn_for_reader.server_exited.store(true, Ordering::SeqCst);
                         break;
                     }
@@ -98,8 +94,8 @@ impl Connection {
     }
 
     pub fn send_packet(&self, packet: &Packet) -> std::io::Result<()> {
-        let mut stream = self.writer.lock().unwrap();
-        match write_packet(&mut *stream, packet) {
+        let mut writer = self.writer.lock().unwrap();
+        match write_packet(&mut **writer, packet) {
             Ok(()) => Ok(()),
             Err(_) if self.server_has_exited() => Err(Self::server_crashed_error()),
             Err(e) => Err(e),

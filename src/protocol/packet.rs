@@ -13,7 +13,7 @@ pub struct Packet {
     pub payload: Vec<u8>,
 }
 
-pub fn write_packet<W: Write>(writer: &mut W, packet: &Packet) -> std::io::Result<()> {
+pub fn write_packet<W: Write + ?Sized>(writer: &mut W, packet: &Packet) -> std::io::Result<()> {
     let message_id = if packet.is_reply {
         packet.message_id | REPLY_BIT
     } else {
@@ -42,7 +42,7 @@ pub fn write_packet<W: Write>(writer: &mut W, packet: &Packet) -> std::io::Resul
     Ok(())
 }
 
-pub fn read_packet<R: Read>(reader: &mut R) -> std::io::Result<Packet> {
+pub fn read_packet<R: Read + ?Sized>(reader: &mut R) -> std::io::Result<Packet> {
     let mut header = [0u8; PACKET_HEADER_SIZE];
     reader.read_exact(&mut header)?;
 
