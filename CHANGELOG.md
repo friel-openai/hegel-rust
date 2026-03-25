@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4 - 2026-03-25
+
+This release moves over to using the new stdio version of hegel-core.
+This should not be a user visible change.
+
 ## 0.2.3 - 2026-03-25
 
 This release changes the way the client manages the server to run a single persistent process for the whole test run.
