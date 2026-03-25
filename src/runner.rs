@@ -749,7 +749,7 @@ where
         }
 
         // Process final replay test cases (one per interesting example)
-        let mut final_panic_message: Option<String> = None;
+        let mut final_result: Option<TestCaseResult> = None;
         for _ in 0..n_interesting {
             let (event_id, event_payload) = test_channel
                 .receive_request()
@@ -769,7 +769,7 @@ where
                 .write_reply(event_id, cbor_encode(&ack_null))
                 .expect("Failed to ack final test_case");
 
-            let msg = run_test_case(
+            let tc_result = run_test_case(
                 connection,
                 test_case_channel,
                 &mut test_fn,
@@ -778,8 +778,8 @@ where
                 &got_interesting,
             );
 
-            if let Some(m) = msg {
-                final_panic_message = Some(m);
+            if matches!(&tc_result, TestCaseResult::Interesting { .. }) {
+                final_result = Some(tc_result);
             }
 
             if connection.server_has_exited() {
@@ -807,15 +807,21 @@ where
         }
 
         if test_failed {
-            panic!(
-                "Property test failed: {}",
-                final_panic_message.as_deref().unwrap_or("unknown")
-            );
+            let msg = match &final_result {
+                Some(TestCaseResult::Interesting { panic_message }) => panic_message.as_str(),
+                _ => "unknown",
+            };
+            panic!("Property test failed: {}", msg);
         }
     }
 }
 
-/// Run a single test case. Returns the panic message if the test was interesting.
+enum TestCaseResult {
+    Valid,
+    Invalid,
+    Interesting { panic_message: String },
+}
+
 fn run_test_case<F: FnMut(TestCase)>(
     connection: &Arc<Connection>,
     test_channel: Channel,
@@ -823,19 +829,19 @@ fn run_test_case<F: FnMut(TestCase)>(
     is_final: bool,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
-) -> Option<String> {
+) -> TestCaseResult {
     // Create TestCase. The test function gets a clone (cheap Rc bump),
     // so we retain access to the same underlying TestCaseData after the test runs.
     let tc = TestCase::new(Arc::clone(connection), test_channel, verbosity, is_final);
 
     let result = with_test_context(|| catch_unwind(AssertUnwindSafe(|| test_fn(tc.clone()))));
 
-    let (status, origin, interesting_msg) = match &result {
-        Ok(()) => ("VALID".to_string(), None, None),
+    let (tc_result, origin) = match &result {
+        Ok(()) => (TestCaseResult::Valid, None),
         Err(e) => {
             let msg = panic_message(e);
             if msg == ASSUME_FAIL_STRING || msg == STOP_TEST_STRING {
-                ("INVALID".to_string(), None, None)
+                (TestCaseResult::Invalid, None)
             } else {
                 got_interesting.store(true, Ordering::SeqCst);
 
@@ -872,7 +878,10 @@ fn run_test_case<F: FnMut(TestCase)>(
                 }
 
                 let origin = format!("Panic at {}", location);
-                ("INTERESTING".to_string(), Some(origin), Some(msg))
+                (
+                    TestCaseResult::Interesting { panic_message: msg },
+                    Some(origin),
+                )
             }
         }
     };
@@ -880,19 +889,24 @@ fn run_test_case<F: FnMut(TestCase)>(
     // Send mark_complete using the same channel that generators used.
     // Skip if test was aborted (StopTest) - server already closed the channel.
     if !tc.test_aborted() {
+        let status = match &tc_result {
+            TestCaseResult::Valid => "VALID",
+            TestCaseResult::Invalid => "INVALID",
+            TestCaseResult::Interesting { .. } => "INTERESTING",
+        };
         let origin_value = match &origin {
             Some(s) => Value::Text(s.clone()),
             None => Value::Null,
         };
         let mark_complete = cbor_map! {
             "command" => "mark_complete",
-            "status" => status.as_str(),
+            "status" => status,
             "origin" => origin_value
         };
         tc.send_mark_complete(&mark_complete);
     }
 
-    interesting_msg
+    tc_result
 }
 
 /// Extract a message from a panic payload.
