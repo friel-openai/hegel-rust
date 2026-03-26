@@ -1157,6 +1157,37 @@ mod tests {
     }
 
     #[test]
+    fn test_install_hegel_server_uv_exec_error() {
+        let _guard = ENV_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Create a directory named "uv" — trying to exec a directory gives
+        // an IO error that is NOT NotFound (it's PermissionDenied or similar)
+        let mock_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(mock_dir.path().join("uv")).unwrap();
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // Set PATH to ONLY the mock dir (so real uv can't be found)
+        unsafe {
+            std::env::set_var("PATH", mock_dir.path());
+        };
+
+        let result = install_hegel_server(server_dir, "99.99.99");
+
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Should be "Failed to run `uv venv`" (not the UV_NOT_FOUND message)
+        assert!(
+            err.contains("Failed to run `uv venv`"),
+            "expected uv exec error, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_is_in_ci_detects_ci_env_and_disables_database() {
         let _guard = ENV_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("CI").ok();

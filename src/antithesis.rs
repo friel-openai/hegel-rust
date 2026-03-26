@@ -147,4 +147,23 @@ mod tests {
         assert!(contents.contains("test_func_42"));
         assert!(contents.contains("test_module"));
     }
+
+    #[test]
+    #[should_panic(expected = "Expected ANTITHESIS_OUTPUT_DIR")]
+    fn test_is_running_in_antithesis_with_nonexistent_dir() {
+        let _guard = ENV_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("ANTITHESIS_OUTPUT_DIR").ok();
+        unsafe {
+            std::env::set_var(
+                "ANTITHESIS_OUTPUT_DIR",
+                "/nonexistent/path/for/coverage/test",
+            )
+        };
+        let _result = is_running_in_antithesis();
+        // Restore (won't reach here due to panic, but keep for completeness)
+        match original {
+            Some(v) => unsafe { std::env::set_var("ANTITHESIS_OUTPUT_DIR", v) },
+            None => unsafe { std::env::remove_var("ANTITHESIS_OUTPUT_DIR") },
+        }
+    }
 }
