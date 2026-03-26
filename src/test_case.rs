@@ -484,3 +484,16 @@ pub mod labels {
     pub const SAMPLED_FROM: u64 = 14;
     pub const ENUM_VARIANT: u64 = 15;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stop_test_error_display() {
+        let err = StopTestError;
+        assert_eq!(format!("{err}"), "Server ran out of data (StopTest)");
+        // Verify it implements Error trait
+        let _: &dyn std::error::Error = &err;
+    }
+}

@@ -267,20 +267,27 @@ fn init_panic_hook() {
 }
 
 fn ensure_hegel_installed() -> Result<String, String> {
-    let venv_dir = format!("{HEGEL_SERVER_DIR}/venv");
+    install_hegel_server(HEGEL_SERVER_DIR, HEGEL_SERVER_VERSION)
+}
+
+/// Install the hegel server into a directory using `uv`.
+///
+/// Returns the path to the installed `hegel` binary on success.
+fn install_hegel_server(server_dir: &str, version: &str) -> Result<String, String> {
+    let venv_dir = format!("{server_dir}/venv");
     let version_file = format!("{venv_dir}/hegel-version");
     let hegel_bin = format!("{venv_dir}/bin/hegel");
-    let install_log = format!("{HEGEL_SERVER_DIR}/install.log");
+    let install_log = format!("{server_dir}/install.log");
 
     // Check cached version
     if let Ok(cached) = std::fs::read_to_string(&version_file) {
-        if cached.trim() == HEGEL_SERVER_VERSION && std::path::Path::new(&hegel_bin).is_file() {
+        if cached.trim() == version && std::path::Path::new(&hegel_bin).is_file() {
             return Ok(hegel_bin);
         }
     }
 
-    std::fs::create_dir_all(HEGEL_SERVER_DIR)
-        .map_err(|e| format!("Failed to create {HEGEL_SERVER_DIR}: {e}"))?;
+    std::fs::create_dir_all(server_dir)
+        .map_err(|e| format!("Failed to create {server_dir}: {e}"))?;
 
     let log_file = std::fs::File::create(&install_log)
         .map_err(|e| format!("Failed to create install log: {e}"))?;
@@ -311,7 +318,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
             "install",
             "--python",
             &python_path,
-            &format!("hegel-core=={HEGEL_SERVER_VERSION}"),
+            &format!("hegel-core=={version}"),
         ])
         .stderr(log_file.try_clone().unwrap())
         .stdout(log_file)
@@ -320,7 +327,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
     if !status.success() {
         let log = std::fs::read_to_string(&install_log).unwrap_or_default();
         return Err(format!(
-            "Failed to install hegel-core (version: {HEGEL_SERVER_VERSION}). \
+            "Failed to install hegel-core (version: {version}). \
              Set {HEGEL_SERVER_COMMAND_ENV} to a hegel binary path to skip installation.\n\
              Install log:\n{log}"
         ));
@@ -330,7 +337,7 @@ fn ensure_hegel_installed() -> Result<String, String> {
         return Err(format!("hegel not found at {hegel_bin} after installation"));
     }
 
-    std::fs::write(&version_file, HEGEL_SERVER_VERSION)
+    std::fs::write(&version_file, version)
         .map_err(|e| format!("Failed to write version file: {e}"))?;
 
     Ok(hegel_bin)
@@ -948,6 +955,147 @@ mod tests {
     fn test_settings_verbosity_setter() {
         let s = Settings::new().verbosity(Verbosity::Debug);
         assert_eq!(s.verbosity, Verbosity::Debug);
+    }
+
+    #[test]
+    fn test_install_hegel_server_uses_cache_when_version_matches() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Create fake cached install
+        let venv_dir = format!("{server_dir}/venv");
+        let bin_dir = format!("{venv_dir}/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(format!("{venv_dir}/hegel-version"), "1.2.3").unwrap();
+        std::fs::write(format!("{bin_dir}/hegel"), "fake-binary").unwrap();
+
+        let result = install_hegel_server(server_dir, "1.2.3");
+        assert!(result.is_ok());
+        assert!(result.unwrap().ends_with("/bin/hegel"));
+    }
+
+    #[test]
+    fn test_install_hegel_server_uv_not_found() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Save and replace PATH with empty dir so uv can't be found
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let empty_dir = tempfile::TempDir::new().unwrap();
+        // SAFETY: test-specific env manipulation
+        unsafe { std::env::set_var("PATH", empty_dir.path()) };
+
+        let result = install_hegel_server(server_dir, "99.99.99");
+
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("uv"), "error should mention uv: {}", err);
+    }
+
+    #[test]
+    fn test_install_hegel_server_uv_venv_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Create a fake uv script that exits with failure
+        let mock_dir = tempfile::TempDir::new().unwrap();
+        let mock_uv = mock_dir.path().join("uv");
+        std::fs::write(&mock_uv, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&mock_uv, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: test-specific env manipulation
+        unsafe {
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", mock_dir.path().display(), original_path),
+            )
+        };
+
+        let result = install_hegel_server(server_dir, "99.99.99");
+
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("uv venv failed"),);
+    }
+
+    #[test]
+    fn test_install_hegel_server_pip_install_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Create a fake uv that succeeds for venv but fails for pip install
+        let mock_dir = tempfile::TempDir::new().unwrap();
+        let mock_uv = mock_dir.path().join("uv");
+        std::fs::write(
+            &mock_uv,
+            "#!/bin/sh\nif [ \"$1\" = \"venv\" ]; then mkdir -p \"$3\"; exit 0; fi\nexit 1\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&mock_uv, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: test-specific env manipulation
+        unsafe {
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", mock_dir.path().display(), original_path),
+            )
+        };
+
+        let result = install_hegel_server(server_dir, "99.99.99");
+
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to install hegel-core"),);
+    }
+
+    #[test]
+    fn test_install_hegel_server_binary_missing_after_install() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let server_dir = dir.path().to_str().unwrap();
+
+        // Create a fake uv that succeeds for both commands but doesn't create the binary
+        let mock_dir = tempfile::TempDir::new().unwrap();
+        let mock_uv = mock_dir.path().join("uv");
+        std::fs::write(
+            &mock_uv,
+            "#!/bin/sh\nif [ \"$1\" = \"venv\" ]; then mkdir -p \"$3\"; fi\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&mock_uv, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: test-specific env manipulation
+        unsafe {
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", mock_dir.path().display(), original_path),
+            )
+        };
+
+        let result = install_hegel_server(server_dir, "99.99.99");
+
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("hegel not found at"),);
     }
 
     #[test]
