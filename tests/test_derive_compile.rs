@@ -25,6 +25,22 @@ fn main() {}
 }
 
 #[test]
+fn test_hegel_test_with_empty_parens() {
+    TempRustProject::new()
+        .test_file(
+            "empty_parens.rs",
+            r#"
+#[hegel::test()]
+fn my_test(tc: hegel::TestCase) {
+    let _ = tc.draw(hegel::generators::booleans());
+}
+"#,
+        )
+        .main_file("fn main() {}")
+        .cargo_test(&[]);
+}
+
+#[test]
 fn test_derive_rejects_tuple_struct() {
     TempRustProject::new()
         .main_file(

@@ -214,3 +214,12 @@ fn test_generator_by_reference(tc: TestCase) {
     let value2 = tc.draw(&int_gen);
     assert!((0..=100).contains(&value2));
 }
+
+#[hegel::test]
+fn test_generator_reference_in_vec(tc: TestCase) {
+    let int_gen = generators::integers::<i32>().min_value(0).max_value(50);
+    // Wrapping &gen in vecs() exercises as_basic() on the &G impl
+    let values: Vec<i32> = tc.draw(generators::vecs(&int_gen).min_size(1).max_size(5));
+    assert!(!values.is_empty());
+    assert!(values.iter().all(|v| (0..=50).contains(v)));
+}
