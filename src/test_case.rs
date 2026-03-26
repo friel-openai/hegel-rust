@@ -45,6 +45,29 @@ fn protocol_debug() -> bool {
     )
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum RequestErrorKind {
+    StopTest,
+    FlakyReplay,
+    ServerCrashed,
+    CommunicationError,
+}
+
+pub(crate) fn classify_request_error(error_msg: &str, server_exited: bool) -> RequestErrorKind {
+    if error_msg.contains("overflow")
+        || error_msg.contains("StopTest")
+        || error_msg.contains("channel is closed")
+    {
+        RequestErrorKind::StopTest
+    } else if error_msg.contains("FlakyStrategyDefinition") || error_msg.contains("FlakyReplay") {
+        RequestErrorKind::FlakyReplay
+    } else if server_exited {
+        RequestErrorKind::ServerCrashed
+    } else {
+        RequestErrorKind::CommunicationError
+    }
+}
+
 pub(crate) const ASSUME_FAIL_STRING: &str = "__HEGEL_ASSUME_FAIL";
 
 /// The sentinel string used to identify overflow/StopTest panics.
@@ -300,32 +323,31 @@ impl TestCase {
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                if error_msg.contains("overflow")
-                    || error_msg.contains("StopTest")
-                    || error_msg.contains("channel is closed")
-                {
-                    if debug {
-                        eprintln!("RESPONSE: StopTest/overflow");
+                let server_exited = self.global.borrow().connection.server_has_exited();
+                match classify_request_error(&error_msg, server_exited) {
+                    RequestErrorKind::StopTest => {
+                        if debug {
+                            eprintln!("RESPONSE: StopTest/overflow");
+                        }
+                        let mut global = self.global.borrow_mut();
+                        global.channel.mark_closed();
+                        global.test_aborted = true;
+                        drop(global);
+                        Err(StopTestError)
                     }
-                    let mut global = self.global.borrow_mut();
-                    global.channel.mark_closed();
-                    global.test_aborted = true;
-                    drop(global);
-                    Err(StopTestError)
-                } else if error_msg.contains("FlakyStrategyDefinition")
-                    || error_msg.contains("FlakyReplay")
-                {
-                    // Abort the test case; the server will report the flaky
-                    // error in the test_done results, which runner.rs handles.
-                    let mut global = self.global.borrow_mut();
-                    global.channel.mark_closed();
-                    global.test_aborted = true;
-                    drop(global);
-                    Err(StopTestError)
-                } else if self.global.borrow().connection.server_has_exited() {
-                    panic!("{}", SERVER_CRASHED_MESSAGE);
-                } else {
-                    panic!("Failed to communicate with Hegel: {}", e);
+                    RequestErrorKind::FlakyReplay => {
+                        let mut global = self.global.borrow_mut();
+                        global.channel.mark_closed();
+                        global.test_aborted = true;
+                        drop(global);
+                        Err(StopTestError)
+                    }
+                    RequestErrorKind::ServerCrashed => {
+                        panic!("{}", SERVER_CRASHED_MESSAGE);
+                    }
+                    RequestErrorKind::CommunicationError => {
+                        panic!("Failed to communicate with Hegel: {}", e);
+                    }
                 }
             }
         }
@@ -488,6 +510,68 @@ pub mod labels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_classify_overflow_error() {
+        assert_eq!(
+            classify_request_error("data overflow detected", false),
+            RequestErrorKind::StopTest,
+        );
+    }
+
+    #[test]
+    fn test_classify_stop_test_error() {
+        assert_eq!(
+            classify_request_error("StopTest: data exhausted", false),
+            RequestErrorKind::StopTest,
+        );
+    }
+
+    #[test]
+    fn test_classify_channel_closed_error() {
+        assert_eq!(
+            classify_request_error("channel is closed", false),
+            RequestErrorKind::StopTest,
+        );
+    }
+
+    #[test]
+    fn test_classify_flaky_strategy_error() {
+        assert_eq!(
+            classify_request_error("FlakyStrategyDefinition: unstable", false),
+            RequestErrorKind::FlakyReplay,
+        );
+    }
+
+    #[test]
+    fn test_classify_flaky_replay_error() {
+        assert_eq!(
+            classify_request_error("FlakyReplay: changed during replay", false),
+            RequestErrorKind::FlakyReplay,
+        );
+    }
+
+    #[test]
+    fn test_classify_server_crashed() {
+        assert_eq!(
+            classify_request_error("connection reset by peer", true),
+            RequestErrorKind::ServerCrashed,
+        );
+    }
+
+    #[test]
+    fn test_classify_communication_error() {
+        assert_eq!(
+            classify_request_error("unexpected EOF", false),
+            RequestErrorKind::CommunicationError,
+        );
+    }
+
+    #[test]
+    fn test_protocol_debug_returns_false_by_default() {
+        // protocol_debug() checks HEGEL_PROTOCOL_DEBUG env var
+        assert!(!protocol_debug());
+    }
 
     #[test]
     fn test_stop_test_error_display() {
