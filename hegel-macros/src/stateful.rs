@@ -39,8 +39,8 @@ pub fn expand_state_machine(mut block: ItemImpl) -> TokenStream {
             fn rules(&self) -> Vec<::hegel::stateful::Rule<Self>> {
                 vec![ #( ::hegel::stateful::Rule::new(#rule_name_strings, Self::#rule_names) ),* ]
             }
-            fn invariants(&self) -> Vec<::hegel::stateful::Invariant<Self>> {
-                vec![ #( ::hegel::stateful::Invariant::new(#invariant_name_strings, Self::#invariant_names) ),* ]
+            fn invariants(&self) -> Vec<::hegel::stateful::Rule<Self>> {
+                vec![ #( ::hegel::stateful::Rule::new(#invariant_name_strings, Self::#invariant_names) ),* ]
             }
         }
     }
