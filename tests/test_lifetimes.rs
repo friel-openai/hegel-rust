@@ -203,3 +203,14 @@ fn test_boxed_generator_with_local_lifetime(tc: TestCase) {
 
     assert!(t.len() == 3);
 }
+
+#[hegel::test]
+fn test_generator_by_reference(tc: TestCase) {
+    let int_gen = generators::integers::<i32>().min_value(0).max_value(100);
+    // Use the generator by reference to exercise the Generator impl for &G
+    let value = tc.draw(&int_gen);
+    assert!((0..=100).contains(&value));
+    // Draw again from the same reference
+    let value2 = tc.draw(&int_gen);
+    assert!((0..=100).contains(&value2));
+}
