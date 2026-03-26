@@ -72,7 +72,7 @@ fn acquire_file_lock(lock_dir: &std::path::Path) -> Result<(), String> {
 
 /// Release the cross-process file lock.
 fn release_file_lock(lock_dir: &std::path::Path) {
-    let _ = std::fs::remove_dir(lock_dir);
+    std::fs::remove_dir(lock_dir).expect("Failed to release install lock");
 }
 
 const UV_NOT_FOUND_MESSAGE: &str = "\
@@ -368,11 +368,6 @@ fn do_install(
 
     let venv_str = venv_dir.to_string_lossy();
 
-    eprintln!(
-        "hegel: installing hegel-core {} into {}...",
-        HEGEL_SERVER_VERSION, venv_str
-    );
-
     let log_file = std::fs::File::create(install_log)
         .map_err(|e| format!("Failed to create install log: {e}"))?;
 
@@ -428,7 +423,6 @@ fn do_install(
     std::fs::write(version_file, HEGEL_SERVER_VERSION)
         .map_err(|e| format!("Failed to write version file: {e}"))?;
 
-    eprintln!("hegel: installation complete.");
     Ok(hegel_bin.to_string_lossy().into_owned())
 }
 
@@ -1235,11 +1229,10 @@ mod tests {
     }
 
     #[test]
-    fn file_lock_release_is_idempotent() {
+    #[should_panic(expected = "Failed to release install lock")]
+    fn file_lock_release_panics_when_not_held() {
         let dir = TempDir::new().unwrap();
         let lock_dir = dir.path().join(".install-lock");
-        // Release without ever acquiring — should not panic.
-        release_file_lock(&lock_dir);
         release_file_lock(&lock_dir);
     }
 
