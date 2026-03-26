@@ -33,29 +33,20 @@ fn error_test(mode: &str) -> TempRustProject {
         .env("HEGEL_PROTOCOL_TEST_MODE", mode)
 }
 
-/// Tests that require unreleased hegel-core test modes (from hegeldev/hegel-core#68).
-/// These are ignored in CI until the hegel-core PR merges and is released.
-/// Run locally with: cargo test --test test_error_handling -- --ignored
+/// Check if hegel-core has the new test modes from hegeldev/hegel-core#68.
+/// The hegel-core sibling project exists with the new modes when developing
+/// locally; in CI, hegel-core is installed from the released version.
 fn has_new_test_modes() -> bool {
-    let hegel = local_hegel_binary();
-    std::path::Path::new(&hegel).exists()
-        && std::process::Command::new(&hegel)
-            .env("HEGEL_PROTOCOL_TEST_MODE", "failed_no_reason")
-            .arg("--stdio")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .ok()
-            .and_then(|mut child| {
-                drop(child.stdin.take());
-                child.wait_with_output().ok()
-            })
-            .map(|output| {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                !stderr.contains("Unknown test mode")
-            })
-            .unwrap_or(false)
+    // Check for the sibling hegel-core checkout with the new test_server code
+    let sibling = format!(
+        "{}/../hegel-core/src/hegel/test_server.py",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    if let Ok(content) = std::fs::read_to_string(&sibling) {
+        content.contains("failed_no_reason")
+    } else {
+        false
+    }
 }
 
 macro_rules! requires_new_modes {
