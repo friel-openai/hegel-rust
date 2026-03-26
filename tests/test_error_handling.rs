@@ -176,6 +176,19 @@ fn test_server_crash() {
         .cargo_run(&[]);
 }
 
+// === Communication error (non-StopTest error from server) ===
+
+#[test]
+fn test_error_response_causes_communication_error() {
+    // error_response mode sends a RequestError on generate.
+    // The error message doesn't match StopTest/FlakyReplay patterns,
+    // so it should hit the CommunicationError panic path.
+    error_test("error_response")
+        .main_file(SIMPLE_TEST)
+        .expect_failure("Property test failed")
+        .cargo_run(&[]);
+}
+
 // === Antithesis paths ===
 
 #[test]
