@@ -703,9 +703,13 @@ where
         let result_data: Value;
         let ack_null = cbor_map! {"result" => Value::Null};
         loop {
-            let (event_id, event_payload) = test_channel
-                .receive_request()
-                .expect("Failed to receive event");
+            let (event_id, event_payload) = match test_channel.receive_request() {
+                Ok(event) => event,
+                Err(_) if connection.server_has_exited() => {
+                    panic!("{}", SERVER_CRASHED_MESSAGE);
+                }
+                Err(e) => panic!("Failed to receive event: {}", e),
+            };
 
             let event: Value = cbor_decode(&event_payload);
             let event_type = map_get(&event, "event")
@@ -737,10 +741,6 @@ where
                         verbosity,
                         &got_interesting,
                     );
-
-                    if connection.server_has_exited() {
-                        panic!("{}", SERVER_CRASHED_MESSAGE);
-                    }
                 }
                 "test_done" => {
                     let ack_true = cbor_map! {"result" => true};
@@ -812,10 +812,6 @@ where
             if matches!(&tc_result, TestCaseResult::Interesting { .. }) {
                 final_result = Some(tc_result);
             }
-
-            if connection.server_has_exited() {
-                panic!("{}", SERVER_CRASHED_MESSAGE);
-            }
         }
 
         let passed = map_get(&result_data, "passed")
@@ -824,18 +820,7 @@ where
 
         let test_failed = !passed || got_interesting.load(Ordering::SeqCst);
 
-        if is_running_in_antithesis() {
-            #[cfg(not(feature = "antithesis"))]
-            panic!(
-                "When Hegel is run inside of Antithesis, it requires the `antithesis` feature. \
-                You can add it with {{ features = [\"antithesis\"] }}."
-            );
-
-            #[cfg(feature = "antithesis")]
-            if let Some(ref loc) = self.test_location {
-                crate::antithesis::emit_assertion(loc, !test_failed);
-            }
-        }
+        handle_antithesis_reporting(self.test_location.as_ref(), test_failed);
 
         if test_failed {
             let msg = match &final_result {
@@ -935,6 +920,22 @@ fn run_test_case<F: FnMut(TestCase)>(
     tc_result
 }
 
+/// Report test results to Antithesis if running in that environment.
+fn handle_antithesis_reporting(test_location: Option<&TestLocation>, test_failed: bool) {
+    if is_running_in_antithesis() {
+        #[cfg(not(feature = "antithesis"))]
+        panic!(
+            "When Hegel is run inside of Antithesis, it requires the `antithesis` feature. \
+            You can add it with {{ features = [\"antithesis\"] }}."
+        );
+
+        #[cfg(feature = "antithesis")]
+        if let Some(loc) = test_location {
+            crate::antithesis::emit_assertion(loc, !test_failed);
+        }
+    }
+}
+
 /// Encode a ciborium::Value to CBOR bytes.
 fn cbor_encode(value: &Value) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -958,6 +959,46 @@ mod tests {
         let default_settings = Settings::default();
         let new_settings = Settings::new();
         assert_eq!(default_settings.test_cases, new_settings.test_cases);
+    }
+
+    #[cfg(feature = "antithesis")]
+    #[test]
+    fn test_antithesis_reporting_emits_on_failure() {
+        let _guard = ENV_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        let original = std::env::var("ANTITHESIS_OUTPUT_DIR").ok();
+        unsafe { std::env::set_var("ANTITHESIS_OUTPUT_DIR", &path) };
+
+        let loc = TestLocation {
+            function: "test_antithesis_report".into(),
+            file: "test.rs".into(),
+            class: "test_mod".into(),
+            begin_line: 42,
+        };
+        handle_antithesis_reporting(Some(&loc), true);
+
+        match original {
+            Some(v) => unsafe { std::env::set_var("ANTITHESIS_OUTPUT_DIR", v) },
+            None => unsafe { std::env::remove_var("ANTITHESIS_OUTPUT_DIR") },
+        }
+
+        let jsonl = dir.path().join("sdk.jsonl");
+        assert!(jsonl.exists());
+    }
+
+    #[test]
+    fn test_antithesis_reporting_noop_without_env() {
+        let _guard = ENV_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("ANTITHESIS_OUTPUT_DIR").ok();
+        if original.is_some() {
+            unsafe { std::env::remove_var("ANTITHESIS_OUTPUT_DIR") };
+        }
+        // Should not panic when not in antithesis
+        handle_antithesis_reporting(None, false);
+        if let Some(v) = original {
+            unsafe { std::env::set_var("ANTITHESIS_OUTPUT_DIR", v) };
+        }
     }
 
     #[test]
