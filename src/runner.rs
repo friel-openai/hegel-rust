@@ -856,12 +856,7 @@ fn run_test_case<F: FnMut(TestCase)>(
                 // Take panic info - we need location for origin, and print details on final
                 let (thread_name, thread_id, location, backtrace) = take_panic_info()
                     .unwrap_or_else(|| {
-                        (
-                            "<unknown>".to_string(),
-                            "?".to_string(),
-                            "<unknown>".to_string(),
-                            Backtrace::disabled(),
-                        )
+                        unreachable!("panic hook should always capture info before we reach here")
                     });
 
                 if is_final {

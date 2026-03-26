@@ -126,17 +126,45 @@ fn test_failing_test_output_with_full_backtrace() {
     );
 }
 
-/// Exercise the in-process failure path to cover the backtrace output,
-/// panic info capture, and test result handling in run_test_case.
+/// Exercise the in-process failure path to cover panic info capture
+/// and test result handling in run_test_case.
 #[test]
 #[should_panic(expected = "Property test failed")]
-fn test_in_process_failure_exercises_backtrace_path() {
+fn test_in_process_failure_exercises_panic_path() {
     Hegel::new(|tc| {
         let x: i32 = tc.draw(generators::integers());
         panic!("intentional-test-failure-42: {}", x);
     })
     .settings(Settings::new().test_cases(10).derandomize(true))
     .run();
+}
+
+/// Exercise the backtrace output path by running a failing test with
+/// RUST_BACKTRACE=1 to force Backtrace::capture() to actually capture.
+#[test]
+fn test_in_process_failure_with_backtrace() {
+    // SAFETY: serialized by ENV_TEST_MUTEX
+    let _guard = hegel::ENV_TEST_MUTEX
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let original = std::env::var("RUST_BACKTRACE").ok();
+    unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Hegel::new(|tc| {
+            let _: bool = tc.draw(generators::booleans());
+            panic!("backtrace-coverage-test-99");
+        })
+        .settings(Settings::new().test_cases(5).derandomize(true))
+        .run();
+    }));
+
+    match original {
+        Some(v) => unsafe { std::env::set_var("RUST_BACKTRACE", v) },
+        None => unsafe { std::env::remove_var("RUST_BACKTRACE") },
+    }
+
+    assert!(result.is_err(), "expected Hegel::run to panic");
 }
 
 /// Exercise the verbosity debug path
