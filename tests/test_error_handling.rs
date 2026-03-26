@@ -168,11 +168,14 @@ fn test_flaky_replay() {
         .cargo_run(&[]);
 }
 
-// TODO: server_crash mode hangs because connection.close() in Python
-// doesn't break the client's stdio pipes quickly enough. The server
-// monitor thread detects the exit but the client blocks in recv.
-// #[test]
-// fn test_server_crash() { ... }
+#[test]
+#[ignore] // Server crash with os._exit doesn't reliably break stdio pipes on macOS
+fn test_server_crash() {
+    error_test("server_crash")
+        .main_file(SIMPLE_TEST)
+        .expect_failure("hegel server process exited")
+        .cargo_run(&[]);
+}
 
 // === Antithesis paths ===
 
