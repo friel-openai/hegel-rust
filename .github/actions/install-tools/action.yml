@@ -20,4 +20,4 @@ runs:
       run: sudo apt-get update && sudo apt-get install -y just
       shell: bash
     - if: steps.parse.outputs.uv == 'true'
-      uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0

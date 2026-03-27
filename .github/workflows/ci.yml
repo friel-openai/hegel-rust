@@ -19,13 +19,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal -c rustfmt -c clippy
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: ./.github/actions/install-tools
         with:
@@ -51,13 +51,13 @@ jobs:
       matrix:
         rust: ["1.86", stable]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install Rust
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal && rustup default ${{ matrix.rust }}
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: ./.github/actions/install-tools
         with:
@@ -75,13 +75,13 @@ jobs:
       matrix:
         rust: ["1.86", stable]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install Rust
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal && rustup default ${{ matrix.rust }}
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: ./.github/actions/install-tools
         with:
@@ -96,12 +96,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - name: Install Rust
         run: rustup toolchain install nightly --profile minimal && rustup default nightly
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: ./.github/actions/install-tools
         with:
@@ -120,7 +120,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - name: Install Rust
@@ -144,12 +144,12 @@ jobs:
       matrix:
         rust: ["1.86", stable]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - name: Install Rust
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal && rustup default ${{ matrix.rust }}
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Compile examples
         run: cargo build --examples --all-features
 
@@ -159,13 +159,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal -c llvm-tools-preview
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Install cargo-llvm-cov
         run: cargo install --locked cargo-llvm-cov
@@ -183,13 +183,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
-      - uses: Swatinem/rust-cache@ad397744b0d591a723ab90405b7247fac0e6b8db # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: ./.github/actions/install-tools
         with:
@@ -204,11 +204,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+      - uses: cachix/install-nix-action@1ca7d21a94afc7c957383a2d217460d980de4934 # v31.10.1
       - uses: ./.github/actions/install-tools
         with:
           tools: just
@@ -226,7 +226,7 @@ jobs:
       # Used by our trusted publishing flow
       id-token: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -239,7 +239,7 @@ jobs:
 
       - name: Generate app token
         if: steps.check.outputs.skip != 'true'
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         id: app-token
         with:
           app-id: ${{ vars.HEGEL_RELEASE_APP_ID }}
@@ -248,7 +248,7 @@ jobs:
 
       - name: Re-checkout with app token # zizmor: ignore[artipacked]
         if: steps.check.outputs.skip != 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ steps.app-token.outputs.token }}
 

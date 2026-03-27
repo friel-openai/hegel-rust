@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 - 2026-03-27
+
+This release changes `self` in `#[invariant]` from an immutable reference to a mutable reference:
+
+```rust
+# before
+#[invariant]
+fn my_invariant(&self, ...) {} 
+
+# after
+#[invariant]
+fn my_invariant(&mut self, ...) {}
+```
+
+This will require updating your invariant signatures, but should be strictly more expressive.
+
 ## 0.2.6 - 2026-03-26
 
 Bump our pinned hegel-core to [0.2.3](https://github.com/hegeldev/hegel-core/releases/tag/v0.2.3), incorporating the following change:

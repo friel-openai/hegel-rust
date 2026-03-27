@@ -45,13 +45,13 @@ impl DieHard {
     }
 
     #[invariant]
-    fn physics_of_jugs(&self, _tc: TestCase) {
+    fn physics_of_jugs(&mut self, _tc: TestCase) {
         assert!(0 <= self.small && self.small <= 3);
         assert!(0 <= self.big && self.big <= 5);
     }
 
     #[invariant]
-    fn die_hard_problem_not_solved(&self, tc: TestCase) {
+    fn die_hard_problem_not_solved(&mut self, tc: TestCase) {
         tc.note(&format!("small / big = {0} / {1}", self.small, self.big));
         assert!(self.big != 4);
     }
