@@ -9,6 +9,7 @@ use std::marker::PhantomData;
 ///
 /// ```no_run
 /// use hegel::generators as gs;
+/// use hegel::tuples;
 ///
 /// // 0-tuple (unit)
 /// let gen0 = tuples!();
