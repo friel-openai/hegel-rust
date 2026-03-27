@@ -41,7 +41,7 @@ impl Linear {
     }
 
     #[invariant]
-    fn upper_bound(&self, _tc: TestCase) {
+    fn upper_bound(&mut self, _tc: TestCase) {
         assert!(self.state < 4);
     }
 }

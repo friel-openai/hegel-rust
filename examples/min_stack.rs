@@ -87,7 +87,7 @@ impl MinStackTest {
     }
 
     #[invariant]
-    fn minimums_agree(&self, _: TestCase) {
+    fn minimums_agree(&mut self, _: TestCase) {
         assert_eq!(self.stack.minimum(), self.stack.reference());
     }
 }
