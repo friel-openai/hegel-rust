@@ -40,12 +40,12 @@ use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
     ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
-    ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
+    ReplayPlan as LocalReplayPlan, composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
     positive_float_as_integer_ratio, preferred_float_candidates,
-    probe_integer_containment_mutation_plan, probe_mixed_list_replay_choices,
-    probe_one_of_replay_choices, select_best_replay_plans,
+    probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
+    probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -59,7 +59,6 @@ use hegel_core::shrink::{
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
     shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
-    shrink_list_observation as shrink_core_list_observation,
 };
 #[cfg(feature = "rust-core")]
 use std::io::Write;
@@ -2043,20 +2042,10 @@ fn shrink_local_composite_mixed_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<Choice>> {
-    let current =
-        composite_mixed_list_chunks(replay_choices, spans, crate::test_case::labels::LIST)?;
-    let shrunk = shrink_core_list_observation(
-        current,
-        0,
-        |chunk| match chunk.as_slice() {
-            [Choice::Boolean(false), Choice::String(_)] => {
-                vec![Choice::Boolean(false), Choice::String(String::new())]
-            }
-            [Choice::Boolean(true), Choice::Boolean(_)] => {
-                vec![Choice::Boolean(true), Choice::Boolean(false)]
-            }
-            _ => chunk.clone(),
-        },
+    probe_composite_mixed_list_replay_choices(
+        replay_choices,
+        spans,
+        crate::test_case::labels::LIST,
         |candidate| {
             let backend = Rc::new(RefCell::new(LocalBackend::from_choices(
                 composite_mixed_list_choices(candidate),
@@ -2074,9 +2063,7 @@ fn shrink_local_composite_mixed_list_observation<F: FnMut(TestCase)>(
                 TestCaseResult::Interesting { .. }
             )
         },
-    );
-
-    Some(composite_mixed_list_choices(&shrunk))
+    )
 }
 
 #[cfg(feature = "rust-core")]
