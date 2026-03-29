@@ -41,7 +41,7 @@ tempfile = "3.0"
 ciborium = "0.2.2"
 crc32fast = "1.4"
 hegeltest-macros = { version = "=0.3.4", path = "hegel-macros" }
-hegel_core = { path = "../hegel-core/crates/hegel_core", optional = true }
+hegel_core = { path = "../hegel-core-flatmap-spans/crates/hegel_core", optional = true }
 # optional feature dependencies
 rand = { version = "0.9", optional = true }
 serde_json = { version = "1.0.61", optional = true }

@@ -7,6 +7,7 @@ use hegel_core::engine::{Engine, EngineError, value_conforms_to_schema};
 use hegel_core::schema::{DataValue, Schema};
 
 use crate::cbor_utils::{as_bool, as_text, as_u64, map_get};
+use crate::test_case::labels;
 
 #[derive(Debug)]
 pub enum LocalBackendError {
@@ -59,6 +60,16 @@ impl PoolState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocalSpanRecord {
+    pub label: u64,
+    pub start: usize,
+    pub end: usize,
+    pub parent: Option<usize>,
+    pub children: Vec<usize>,
+    pub discarded: bool,
+}
+
 fn integer_value(value: i128) -> Value {
     let value = i64::try_from(value).expect("local backend integer should fit in i64");
     Value::Integer(value.into())
@@ -77,6 +88,8 @@ pub struct LocalBackend {
     pools: Vec<PoolState>,
     replay_choices: VecDeque<Choice>,
     recorded_choices: Vec<Choice>,
+    spans: Vec<LocalSpanRecord>,
+    span_stack: Vec<usize>,
     forced_values: VecDeque<DataValue>,
     generate_requests: usize,
     first_observed_schema: Option<Schema>,
@@ -94,6 +107,8 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
+            spans: Vec::new(),
+            span_stack: Vec::new(),
             forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
@@ -115,6 +130,8 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: choices.into(),
             recorded_choices: Vec::new(),
+            spans: Vec::new(),
+            span_stack: Vec::new(),
             forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
@@ -132,6 +149,8 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
+            spans: Vec::new(),
+            span_stack: Vec::new(),
             forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
@@ -164,6 +183,10 @@ impl LocalBackend {
 
     pub fn recorded_choices(&self) -> &[Choice] {
         &self.recorded_choices
+    }
+
+    pub fn spans(&self) -> &[LocalSpanRecord] {
+        &self.spans
     }
 
     pub fn handle_request(&mut self, request: &Value) -> Result<Value, LocalBackendError> {
@@ -200,11 +223,27 @@ impl LocalBackend {
                 }
                 self.observed_values.push((schema.clone(), value.clone()));
 
+                let start = self.recorded_choices.len();
                 self.record_choice_for_value(&schema, &value);
+                self.synthesize_generated_spans(&schema, &value, start);
 
                 Ok(data_value_to_cbor(&value))
             }
-            "start_span" | "stop_span" | "mark_complete" => Ok(Value::Null),
+            "start_span" => {
+                let label = map_get(request, "label").and_then(as_u64).ok_or_else(|| {
+                    LocalBackendError::InvalidRequest("missing span label".to_owned())
+                })?;
+                self.start_span(label);
+                Ok(Value::Null)
+            }
+            "stop_span" => {
+                let discard = map_get(request, "discard")
+                    .and_then(as_bool)
+                    .unwrap_or(false);
+                self.stop_span(discard);
+                Ok(Value::Null)
+            }
+            "mark_complete" => Ok(Value::Null),
             "new_collection" => {
                 let base_name = map_get(request, "name")
                     .and_then(as_text)
@@ -357,6 +396,139 @@ impl LocalBackend {
             other => Err(LocalBackendError::InvalidRequest(format!(
                 "unsupported local command {other}"
             ))),
+        }
+    }
+
+    fn start_span(&mut self, label: u64) {
+        let index = self.spans.len();
+        let parent = self.span_stack.last().copied();
+        self.spans.push(LocalSpanRecord {
+            label,
+            start: self.recorded_choices.len(),
+            end: self.recorded_choices.len(),
+            parent,
+            children: Vec::new(),
+            discarded: false,
+        });
+        if let Some(parent) = parent {
+            self.spans[parent].children.push(index);
+        }
+        self.span_stack.push(index);
+    }
+
+    fn stop_span(&mut self, discarded: bool) {
+        let Some(index) = self.span_stack.pop() else {
+            return;
+        };
+        let span = &mut self.spans[index];
+        span.end = self.recorded_choices.len();
+        span.discarded = discarded;
+    }
+
+    fn synthesize_generated_spans(
+        &mut self,
+        schema: &Schema,
+        value: &DataValue,
+        start: usize,
+    ) -> usize {
+        match (schema, value) {
+            (Schema::Const { .. }, _) => start,
+            (Schema::Boolean { .. }, DataValue::Boolean(_))
+            | (Schema::Integer { .. }, DataValue::Integer(_))
+            | (Schema::Float { .. }, DataValue::Float(_))
+            | (Schema::String { .. }, DataValue::String(_))
+            | (Schema::Binary { .. }, DataValue::Binary(_)) => start + 1,
+            (Schema::OneOf { options }, value) => {
+                let index = self.spans.len();
+                let parent = self.span_stack.last().copied();
+                self.spans.push(LocalSpanRecord {
+                    label: labels::ONE_OF,
+                    start,
+                    end: start,
+                    parent,
+                    children: Vec::new(),
+                    discarded: false,
+                });
+                if let Some(parent) = parent {
+                    self.spans[parent].children.push(index);
+                }
+                self.span_stack.push(index);
+                let Some(option) = options
+                    .iter()
+                    .find(|option| value_conforms_to_schema(value, option))
+                else {
+                    self.span_stack.pop();
+                    return start + 1;
+                };
+                let end = self.synthesize_generated_spans(option, value, start + 1);
+                self.span_stack.pop();
+                self.spans[index].end = end;
+                end
+            }
+            (Schema::List { elements, .. }, DataValue::List(values)) => {
+                let index = self.spans.len();
+                let parent = self.span_stack.last().copied();
+                self.spans.push(LocalSpanRecord {
+                    label: labels::LIST,
+                    start,
+                    end: start,
+                    parent,
+                    children: Vec::new(),
+                    discarded: false,
+                });
+                if let Some(parent) = parent {
+                    self.spans[parent].children.push(index);
+                }
+                self.span_stack.push(index);
+
+                let mut offset = start;
+                for value in values {
+                    offset += 1;
+                    let child_index = self.spans.len();
+                    self.spans.push(LocalSpanRecord {
+                        label: labels::LIST_ELEMENT,
+                        start: offset,
+                        end: offset,
+                        parent: Some(index),
+                        children: Vec::new(),
+                        discarded: false,
+                    });
+                    self.spans[index].children.push(child_index);
+                    self.span_stack.push(child_index);
+                    offset = self.synthesize_generated_spans(elements, value, offset);
+                    self.span_stack.pop();
+                    self.spans[child_index].end = offset;
+                }
+                offset += 1;
+
+                self.span_stack.pop();
+                self.spans[index].end = offset;
+                offset
+            }
+            (Schema::Tuple { elements }, DataValue::Tuple(values)) => {
+                let index = self.spans.len();
+                let parent = self.span_stack.last().copied();
+                self.spans.push(LocalSpanRecord {
+                    label: labels::TUPLE,
+                    start,
+                    end: start,
+                    parent,
+                    children: Vec::new(),
+                    discarded: false,
+                });
+                if let Some(parent) = parent {
+                    self.spans[parent].children.push(index);
+                }
+                self.span_stack.push(index);
+                let mut offset = start;
+                for (schema, value) in elements.iter().zip(values) {
+                    offset = self.synthesize_generated_spans(schema, value, offset);
+                }
+                self.span_stack.pop();
+                self.spans[index].end = offset;
+                offset
+            }
+            _ => start,
         }
     }
 
@@ -938,8 +1110,24 @@ impl LocalBackend {
         loop {
             let count = values.len();
             let should_continue = if count < min_size {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(true) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
                 true
             } else if max_size.is_some_and(|max_size| count >= max_size) {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(false) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
                 false
             } else {
                 let Some(choice) = self.replay_choices.pop_front() else {
@@ -979,8 +1167,24 @@ impl LocalBackend {
         loop {
             let count = values.len();
             let should_continue = if count < min_size {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(true) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
                 true
             } else if max_size.is_some_and(|max_size| count >= max_size) {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(false) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
                 false
             } else {
                 let Some(choice) = self.replay_choices.pop_front() else {
@@ -1367,14 +1571,11 @@ impl LocalBackend {
             return;
         }
         for (index, value) in values.iter().enumerate() {
-            if index >= min_size {
-                self.recorded_choices.push(Choice::Boolean(true));
-            }
+            let _ = index;
+            self.recorded_choices.push(Choice::Boolean(true));
             self.record_choice_for_value(elements, value);
         }
-        if max_size.is_none_or(|max_size| values.len() < max_size) {
-            self.recorded_choices.push(Choice::Boolean(false));
-        }
+        self.recorded_choices.push(Choice::Boolean(false));
     }
 
     fn record_integer_list_list_choices(
@@ -1419,18 +1620,18 @@ impl LocalBackend {
         max_size: Option<usize>,
         values: &[DataValue],
     ) {
+        if values.len() < min_size || max_size.is_some_and(|max_size| values.len() > max_size) {
+            return;
+        }
         for (index, value) in values.iter().enumerate() {
-            if index >= min_size {
-                self.recorded_choices.push(Choice::Boolean(true));
-            }
+            let _ = index;
+            self.recorded_choices.push(Choice::Boolean(true));
             let DataValue::Boolean(value) = value else {
                 return;
             };
             self.recorded_choices.push(Choice::Boolean(*value));
         }
-        if max_size.is_none_or(|max_size| values.len() < max_size) {
-            self.recorded_choices.push(Choice::Boolean(false));
-        }
+        self.recorded_choices.push(Choice::Boolean(false));
     }
 
     fn record_boolean_list_list_choices(
@@ -2156,5 +2357,100 @@ mod tests {
             saw_large,
             "expected at least one open-ended collection with size >= 20"
         );
+    }
+
+    #[test]
+    fn local_backend_records_explicit_and_synthesized_spans() {
+        let mut backend = LocalBackend::from_choices(vec![
+            Choice::Integer(2),
+            Choice::Boolean(true),
+            Choice::Boolean(false),
+            Choice::Boolean(false),
+        ]);
+
+        backend
+            .handle_request(&Value::Map(vec![
+                (
+                    Value::Text("command".to_owned()),
+                    Value::Text("start_span".to_owned()),
+                ),
+                (
+                    Value::Text("label".to_owned()),
+                    Value::Integer(labels::FLAT_MAP.into()),
+                ),
+            ]))
+            .expect("start_span should succeed");
+        backend
+            .handle_request(&Value::Map(vec![
+                (
+                    Value::Text("command".to_owned()),
+                    Value::Text("generate".to_owned()),
+                ),
+                (
+                    Value::Text("schema".to_owned()),
+                    Value::Map(vec![
+                        (
+                            Value::Text("type".to_owned()),
+                            Value::Text("integer".to_owned()),
+                        ),
+                        (
+                            Value::Text("min_value".to_owned()),
+                            Value::Integer(0.into()),
+                        ),
+                        (
+                            Value::Text("max_value".to_owned()),
+                            Value::Integer(10.into()),
+                        ),
+                    ]),
+                ),
+            ]))
+            .expect("integer generate should succeed");
+        backend
+            .handle_request(&Value::Map(vec![
+                (
+                    Value::Text("command".to_owned()),
+                    Value::Text("generate".to_owned()),
+                ),
+                (
+                    Value::Text("schema".to_owned()),
+                    Value::Map(vec![
+                        (
+                            Value::Text("type".to_owned()),
+                            Value::Text("list".to_owned()),
+                        ),
+                        (Value::Text("unique".to_owned()), Value::Bool(false)),
+                        (Value::Text("min_size".to_owned()), Value::Integer(1.into())),
+                        (Value::Text("max_size".to_owned()), Value::Integer(1.into())),
+                        (
+                            Value::Text("elements".to_owned()),
+                            Value::Map(vec![(
+                                Value::Text("type".to_owned()),
+                                Value::Text("boolean".to_owned()),
+                            )]),
+                        ),
+                    ]),
+                ),
+            ]))
+            .expect("list generate should succeed");
+        backend
+            .handle_request(&Value::Map(vec![
+                (
+                    Value::Text("command".to_owned()),
+                    Value::Text("stop_span".to_owned()),
+                ),
+                (Value::Text("discard".to_owned()), Value::Bool(false)),
+            ]))
+            .expect("stop_span should succeed");
+
+        let spans = backend.spans();
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].label, labels::FLAT_MAP);
+        assert_eq!(spans[0].start, 0);
+        assert_eq!(spans[0].end, 4);
+        assert_eq!(spans[0].children, vec![1]);
+        assert_eq!(spans[1].label, labels::LIST);
+        assert_eq!(spans[1].parent, Some(0));
+        assert_eq!(spans[1].children, vec![2]);
+        assert_eq!(spans[2].label, labels::LIST_ELEMENT);
     }
 }
