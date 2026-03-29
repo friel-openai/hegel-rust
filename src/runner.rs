@@ -22,9 +22,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 #[cfg(feature = "rust-core")]
-use crate::local_backend::{LocalBackend, LocalSpanRecord};
+use crate::local_backend::LocalBackend;
 #[cfg(feature = "rust-core")]
 use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex_cmp};
+#[cfg(feature = "rust-core")]
+use hegel_core::conjecture::SpanRecord;
 #[cfg(feature = "rust-core")]
 use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
@@ -35,7 +37,8 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    ExampleSortKey, IntegerShrinkObservation, float_choice_index, preferred_float_candidates,
+    ExampleSortKey, IntegerShrinkObservation, float_choice_index, has_child_span_with_label,
+    preferred_float_candidates,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -1820,21 +1823,19 @@ fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
 }
 
 #[cfg(feature = "rust-core")]
-fn has_flatmap_list_span(spans: &[LocalSpanRecord]) -> bool {
-    spans.iter().any(|span| {
-        span.label == crate::test_case::labels::FLAT_MAP
-            && span
-                .children
-                .iter()
-                .any(|child| spans[*child].label == crate::test_case::labels::LIST)
-    })
+fn has_flatmap_list_span(spans: &[SpanRecord]) -> bool {
+    has_child_span_with_label(
+        spans,
+        crate::test_case::labels::FLAT_MAP,
+        crate::test_case::labels::LIST,
+    )
 }
 
 #[cfg(feature = "rust-core")]
 fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     observed_values: &[(Schema, DataValue)],
-    spans: &[LocalSpanRecord],
+    spans: &[SpanRecord],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
@@ -1904,7 +1905,7 @@ fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
 fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     observed_values: &[(Schema, DataValue)],
-    spans: &[LocalSpanRecord],
+    spans: &[SpanRecord],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
@@ -1969,7 +1970,7 @@ fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
 fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     observed_values: &[(Schema, DataValue)],
-    spans: &[LocalSpanRecord],
+    spans: &[SpanRecord],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
@@ -2077,7 +2078,7 @@ fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
 fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     observed_values: &[(Schema, DataValue)],
-    spans: &[LocalSpanRecord],
+    spans: &[SpanRecord],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
@@ -2204,7 +2205,7 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
 #[cfg(feature = "rust-core")]
 fn shrink_local_composite_mixed_list_observation<F: FnMut(TestCase)>(
     replay_choices: &[Choice],
-    spans: &[LocalSpanRecord],
+    spans: &[SpanRecord],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,

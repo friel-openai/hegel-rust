@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use ciborium::Value;
 use hegel_core::choices::Choice;
+use hegel_core::conjecture::SpanRecord;
 use hegel_core::engine::{Engine, EngineError, value_conforms_to_schema};
 use hegel_core::schema::{DataValue, Schema};
 
@@ -60,16 +61,6 @@ impl PoolState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LocalSpanRecord {
-    pub label: u64,
-    pub start: usize,
-    pub end: usize,
-    pub parent: Option<usize>,
-    pub children: Vec<usize>,
-    pub discarded: bool,
-}
-
 fn integer_value(value: i128) -> Value {
     let value = i64::try_from(value).expect("local backend integer should fit in i64");
     Value::Integer(value.into())
@@ -88,7 +79,7 @@ pub struct LocalBackend {
     pools: Vec<PoolState>,
     replay_choices: VecDeque<Choice>,
     recorded_choices: Vec<Choice>,
-    spans: Vec<LocalSpanRecord>,
+    spans: Vec<SpanRecord>,
     span_stack: Vec<usize>,
     forced_values: VecDeque<DataValue>,
     generate_requests: usize,
@@ -185,7 +176,7 @@ impl LocalBackend {
         &self.recorded_choices
     }
 
-    pub fn spans(&self) -> &[LocalSpanRecord] {
+    pub fn spans(&self) -> &[SpanRecord] {
         &self.spans
     }
 
@@ -402,10 +393,11 @@ impl LocalBackend {
     fn start_span(&mut self, label: u64) {
         let index = self.spans.len();
         let parent = self.span_stack.last().copied();
-        self.spans.push(LocalSpanRecord {
+        self.spans.push(SpanRecord {
             label,
             start: self.recorded_choices.len(),
             end: self.recorded_choices.len(),
+            depth: self.span_stack.len(),
             parent,
             children: Vec::new(),
             discarded: false,
@@ -441,10 +433,11 @@ impl LocalBackend {
             (Schema::OneOf { options }, value) => {
                 let index = self.spans.len();
                 let parent = self.span_stack.last().copied();
-                self.spans.push(LocalSpanRecord {
+                self.spans.push(SpanRecord {
                     label: labels::ONE_OF,
                     start,
                     end: start,
+                    depth: self.span_stack.len(),
                     parent,
                     children: Vec::new(),
                     discarded: false,
@@ -468,10 +461,11 @@ impl LocalBackend {
             (Schema::List { elements, .. }, DataValue::List(values)) => {
                 let index = self.spans.len();
                 let parent = self.span_stack.last().copied();
-                self.spans.push(LocalSpanRecord {
+                self.spans.push(SpanRecord {
                     label: labels::LIST,
                     start,
                     end: start,
+                    depth: self.span_stack.len(),
                     parent,
                     children: Vec::new(),
                     discarded: false,
@@ -485,10 +479,11 @@ impl LocalBackend {
                 for value in values {
                     offset += 1;
                     let child_index = self.spans.len();
-                    self.spans.push(LocalSpanRecord {
+                    self.spans.push(SpanRecord {
                         label: labels::LIST_ELEMENT,
                         start: offset,
                         end: offset,
+                        depth: self.span_stack.len(),
                         parent: Some(index),
                         children: Vec::new(),
                         discarded: false,
@@ -508,10 +503,11 @@ impl LocalBackend {
             (Schema::Tuple { elements }, DataValue::Tuple(values)) => {
                 let index = self.spans.len();
                 let parent = self.span_stack.last().copied();
-                self.spans.push(LocalSpanRecord {
+                self.spans.push(SpanRecord {
                     label: labels::TUPLE,
                     start,
                     end: start,
+                    depth: self.span_stack.len(),
                     parent,
                     children: Vec::new(),
                     discarded: false,
