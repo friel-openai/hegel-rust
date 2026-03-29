@@ -30,7 +30,7 @@ use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex
 #[cfg(feature = "rust-core")]
 use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
-use hegel_core::runtime::save_corpus_replacement;
+use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_replacement};
 #[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
@@ -502,20 +502,8 @@ impl LocalExampleDatabase {
         self.inner.fetch(key).unwrap_or_default()
     }
 
-    fn save(&self, key: &[u8], value: &[u8]) {
-        let _ = self.inner.save(key, value);
-    }
-
-    fn move_value(&self, from_key: &[u8], to_key: &[u8], value: &[u8]) {
-        let _ = self.inner.move_value(from_key, to_key, value);
-    }
-
     fn delete(&self, key: &[u8], value: &[u8]) {
         let _ = self.inner.delete(key, value);
-    }
-
-    fn secondary_key(&self, key: &[u8]) -> Vec<u8> {
-        self.inner.secondary_key(key)
     }
 
     fn save_corpus_replacement(
@@ -1169,25 +1157,19 @@ where
                 let recorded_choices = backend.borrow().recorded_choices().to_vec();
                 let recorded_bytes = choices_to_bytes(&recorded_choices);
                 if let (Some(database), Some(database_key)) = (&database, database_key) {
-                    let secondary_key = database.secondary_key(database_key);
-                    match saved_primary_by_origin.get(origin) {
-                        Some(existing)
-                            if shortlex_cmp(&recorded_bytes, existing)
-                                == CmpOrdering::Less =>
-                        {
+                    let existing = saved_primary_by_origin.get(origin).map(Vec::as_slice);
+                    if save_interesting_origin_replacement(
+                        &database.inner,
+                        database_key,
+                        existing,
+                        &recorded_bytes,
+                    )
+                    .unwrap_or(false)
+                    {
+                        if let Some(existing) = existing {
                             append_local_history_trace("saved-secondary", existing);
-                            database.move_value(database_key, &secondary_key, existing);
-                            database.save(database_key, &recorded_bytes);
-                            saved_primary_by_origin
-                                .insert(origin.clone(), recorded_bytes.clone());
                         }
-                        Some(existing) if existing == &recorded_bytes => {}
-                        Some(_) => {}
-                        None => {
-                            database.save(database_key, &recorded_bytes);
-                            saved_primary_by_origin
-                                .insert(origin.clone(), recorded_bytes.clone());
-                        }
+                        saved_primary_by_origin.insert(origin.clone(), recorded_bytes.clone());
                     }
                 }
                 if best_final_bytes.as_ref().is_none_or(|existing| {
