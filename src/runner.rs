@@ -35,8 +35,8 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
-    IntegerShrinkObservation,
+    integer_shrink_candidates, shrink_integer_observation as shrink_core_integer_observation,
+    ExampleSortKey, IntegerShrinkObservation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -2256,7 +2256,13 @@ fn shrink_integer_at_list_index<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<i64> {
-    let candidate_is_interesting = |candidate: i64, test_fn: &mut F| {
+    Some(shrink_core_integer_observation(
+        IntegerShrinkObservation {
+            min_value: observation.min_value,
+            max_value: observation.max_value,
+            value: observation.value,
+        },
+        |candidate| {
         let mut probe = current.to_vec();
         probe[index] = candidate;
         local_value_candidate_is_interesting(
@@ -2271,60 +2277,8 @@ fn shrink_integer_at_list_index<F: FnMut(TestCase)>(
             verbosity,
             got_interesting,
         )
-    };
-
-    let mut best = observation.value;
-
-    if observation.min_value <= 0
-        && 0 <= observation.max_value
-        && candidate_is_interesting(0, test_fn)
-    {
-        return Some(0);
-    }
-
-    if best > 0 {
-        let floor = observation.min_value.max(1);
-        if !(floor..=best).contains(&floor) {
-            return Some(best);
         }
-        if candidate_is_interesting(floor, test_fn) {
-            best = floor;
-        } else {
-            let mut low = floor;
-            let mut high = best;
-            while low + 1 < high {
-                let mid = low + ((high - low) / 2);
-                if candidate_is_interesting(mid, test_fn) {
-                    high = mid;
-                } else {
-                    low = mid;
-                }
-            }
-            best = high;
-        }
-    } else if best < 0 {
-        let ceiling = observation.max_value.min(-1);
-        if !(best..=ceiling).contains(&ceiling) {
-            return Some(best);
-        }
-        if candidate_is_interesting(ceiling, test_fn) {
-            best = ceiling;
-        } else {
-            let mut low = best;
-            let mut high = ceiling;
-            while low + 1 < high {
-                let mid = high - ((high - low) / 2);
-                if candidate_is_interesting(mid, test_fn) {
-                    low = mid;
-                } else {
-                    high = mid - 1;
-                }
-            }
-            best = low;
-        }
-    }
-
-    Some(best)
+    ))
 }
 
 #[cfg(feature = "rust-core")]
@@ -2645,21 +2599,6 @@ fn float_shrink_candidates(
     });
     sorted.dedup_by(|left, right| left.to_bits() == right.to_bits());
     sorted
-}
-
-#[cfg(feature = "rust-core")]
-fn integer_shrink_candidates(current: u64) -> Vec<u64> {
-    let mut candidates = Vec::new();
-    candidates.push(0);
-    let mut step = current;
-    while step > 0 {
-        let candidate = current.saturating_sub(step);
-        if !candidates.contains(&candidate) {
-            candidates.push(candidate);
-        }
-        step /= 2;
-    }
-    candidates
 }
 
 #[cfg(feature = "rust-core")]
