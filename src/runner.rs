@@ -39,6 +39,7 @@ use hegel_core::shrink::{
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
+    shrink_boolean_observation as shrink_core_boolean_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_dict_observation as shrink_core_integer_dict_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
@@ -1211,15 +1212,13 @@ where
                         if plan.forced_prefix_values.len() >= 2 {
                             plan.forced_prefix_values[1] = forced_second_value;
                         }
-                    } else if let Some(forced_prefix_values) =
-                        shrink_local_integer_pair_observation(
-                            plan.seed.unwrap_or(0),
-                            &observed_values,
-                            &mut test_fn,
-                            verbosity,
-                            &got_interesting,
-                        )
-                    {
+                    } else if let Some(forced_prefix_values) = shrink_local_integer_pair_observation(
+                        plan.seed.unwrap_or(0),
+                        &observed_values,
+                        &mut test_fn,
+                        verbosity,
+                        &got_interesting,
+                    ) {
                         plan.forced_prefix_values = forced_prefix_values;
                         plan.forced_value = None;
                     } else if let Some(forced_prefix_values) =
@@ -1263,6 +1262,17 @@ where
                         plan.replay_choices = Some(replay_choices);
                         plan.forced_prefix_values = Vec::new();
                         plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_boolean_fill_const_list_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
                     } else if let Some(result) =
                         backend
                             .borrow()
@@ -1272,6 +1282,7 @@ where
                                     plan.seed.unwrap_or(0),
                                     &schema,
                                     &value,
+                                    plan.replay_choices.as_deref(),
                                     &choices_to_bytes(&recorded_choices),
                                     &mut test_fn,
                                     verbosity,
@@ -1447,6 +1458,9 @@ impl LocalReplayPlan {
 
     fn backend(&self) -> LocalBackend {
         match (&self.replay_choices, self.seed) {
+            (Some(choices), Some(seed)) => {
+                LocalBackend::from_seed_and_choices(seed, choices.clone())
+            }
             (Some(choices), _) => LocalBackend::from_choices(choices.clone()),
             (None, Some(seed)) => LocalBackend::from_seed(seed),
             (None, None) => unreachable!("local replay plan requires a seed or exact choices"),
@@ -1789,6 +1803,72 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
 }
 
 #[cfg(feature = "rust-core")]
+fn shrink_local_boolean_fill_const_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (Schema::Boolean { .. }, DataValue::Boolean(value)),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    if !matches!(elements.as_ref(), Schema::Const { .. }) {
+        return None;
+    }
+
+    let mut current_value = *value;
+    if current_value
+        && local_forced_values_are_interesting(
+            seed,
+            vec![DataValue::Boolean(false), DataValue::List(values.clone())],
+            test_fn,
+            verbosity,
+            got_interesting,
+        )
+    {
+        current_value = false;
+    }
+
+    let mut low = *min_size;
+    let mut high = values.len();
+    while low < high {
+        let mid = low + ((high - low) / 2);
+        if local_forced_values_are_interesting(
+            seed,
+            vec![
+                DataValue::Boolean(current_value),
+                DataValue::List(values[..mid].to_vec()),
+            ],
+            test_fn,
+            verbosity,
+            got_interesting,
+        ) {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+
+    Some(vec![
+        DataValue::Boolean(current_value),
+        DataValue::List(values[..low].to_vec()),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
 fn shrink_local_mixed_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     schema: &Schema,
@@ -1799,9 +1879,7 @@ fn shrink_local_mixed_list_observation<F: FnMut(TestCase)>(
 ) -> Option<Vec<Choice>> {
     let (
         Schema::List {
-            elements,
-            min_size,
-            ..
+            elements, min_size, ..
         },
         DataValue::List(values),
     ) = (schema, value)
@@ -1847,6 +1925,9 @@ enum ForcedLocalValue {
         max_value: Option<f64>,
         allow_nan: bool,
         allow_infinity: bool,
+    },
+    Boolean {
+        value: bool,
     },
     Integer {
         value: i64,
@@ -1935,6 +2016,7 @@ impl ForcedLocalValue {
     fn into_data_value(self) -> DataValue {
         match self {
             Self::Float { value, .. } => DataValue::Float(value),
+            Self::Boolean { value } => DataValue::Boolean(value),
             Self::Integer { value, .. } => DataValue::Integer(value),
             Self::IntegerList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Integer).collect())
@@ -2004,6 +2086,7 @@ impl ForcedLocalValue {
                 allow_nan: _,
                 allow_infinity: _,
             } => (1, vec![float_choice_index(*value)]),
+            Self::Boolean { value } => (1, vec![u128::from(*value)]),
             Self::Integer {
                 value,
                 min_value,
@@ -2237,6 +2320,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
     seed: u64,
     schema: &Schema,
     value: &DataValue,
+    replay_choices: Option<&[Choice]>,
     initial_primary_bytes: &[u8],
     test_fn: &mut F,
     verbosity: Verbosity,
@@ -2273,6 +2357,21 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             downgraded_primary_bytes: Vec::new(),
         }),
+        (Schema::Boolean { .. }, DataValue::Boolean(value)) => Some(LocalShrinkResult {
+            forced_value: ForcedLocalValue::Boolean {
+                value: shrink_core_boolean_observation(*value, |candidate| {
+                    local_boolean_candidate_is_interesting(
+                        seed,
+                        replay_choices,
+                        candidate,
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
+                }),
+            },
+            downgraded_primary_bytes: Vec::new(),
+        }),
         (
             Schema::Integer {
                 min_value,
@@ -2290,6 +2389,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     |candidate| {
                         local_integer_candidate_is_interesting(
                             seed,
+                            replay_choices,
                             candidate,
                             test_fn,
                             verbosity,
@@ -3431,13 +3531,15 @@ fn shrink_integer_list_observation<F: FnMut(TestCase)>(
 #[cfg(feature = "rust-core")]
 fn local_integer_candidate_is_interesting<F: FnMut(TestCase)>(
     seed: u64,
+    replay_choices: Option<&[Choice]>,
     candidate: i64,
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> bool {
-    local_value_candidate_is_interesting(
+    local_value_candidate_bytes_with_replay_if_interesting(
         seed,
+        replay_choices,
         &ForcedLocalValue::Integer {
             value: candidate,
             min_value: None,
@@ -3447,6 +3549,27 @@ fn local_integer_candidate_is_interesting<F: FnMut(TestCase)>(
         verbosity,
         got_interesting,
     )
+    .is_some()
+}
+
+#[cfg(feature = "rust-core")]
+fn local_boolean_candidate_is_interesting<F: FnMut(TestCase)>(
+    seed: u64,
+    replay_choices: Option<&[Choice]>,
+    candidate: bool,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> bool {
+    local_value_candidate_bytes_with_replay_if_interesting(
+        seed,
+        replay_choices,
+        &ForcedLocalValue::Boolean { value: candidate },
+        test_fn,
+        verbosity,
+        got_interesting,
+    )
+    .is_some()
 }
 
 #[cfg(feature = "rust-core")]
@@ -3520,7 +3643,29 @@ fn local_value_candidate_bytes_if_interesting<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<u8>> {
-    let backend = Rc::new(RefCell::new(LocalBackend::from_seed(seed)));
+    local_value_candidate_bytes_with_replay_if_interesting(
+        seed,
+        None,
+        candidate,
+        test_fn,
+        verbosity,
+        got_interesting,
+    )
+}
+
+#[cfg(feature = "rust-core")]
+fn local_value_candidate_bytes_with_replay_if_interesting<F: FnMut(TestCase)>(
+    seed: u64,
+    replay_choices: Option<&[Choice]>,
+    candidate: &ForcedLocalValue,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<u8>> {
+    let backend = Rc::new(RefCell::new(match replay_choices {
+        Some(choices) => LocalBackend::from_seed_and_choices(seed, choices.to_vec()),
+        None => LocalBackend::from_seed(seed),
+    }));
     backend
         .borrow_mut()
         .force_first_value(candidate.clone().into_data_value());
@@ -3835,6 +3980,7 @@ mod tests {
                             seed,
                             &schema,
                             &value,
+                            None,
                             &choices_to_bytes(backend.borrow().recorded_choices()),
                             &mut test_fn,
                             verbosity,

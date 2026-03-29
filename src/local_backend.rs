@@ -103,8 +103,12 @@ impl LocalBackend {
     }
 
     pub fn from_choices(choices: Vec<Choice>) -> Self {
+        Self::from_seed_and_choices(0, choices)
+    }
+
+    pub fn from_seed_and_choices(seed: u64, choices: Vec<Choice>) -> Self {
         Self {
-            engine: Engine::from_seed(0),
+            engine: Engine::from_seed(seed),
             simplest: false,
             next_collection_id: 0,
             collections: HashMap::new(),
@@ -261,8 +265,22 @@ impl LocalBackend {
                     } else {
                         None
                     };
-                    self.choose_boolean(p_continue, forced_result)?
+                    let replayed = match self.replay_choices.front() {
+                        Some(Choice::Boolean(_)) => match self.replay_choices.pop_front() {
+                            Some(Choice::Boolean(value)) => Some(value),
+                            _ => unreachable!("front already matched boolean choice"),
+                        },
+                        _ => None,
+                    };
+                    if let Some(forced) = forced_result {
+                        forced
+                    } else if let Some(replayed) = replayed {
+                        replayed
+                    } else {
+                        self.choose_boolean(p_continue, None)?
+                    }
                 };
+                self.recorded_choices.push(Choice::Boolean(should_continue));
 
                 let state = self.collections.get_mut(&name).ok_or_else(|| {
                     LocalBackendError::InvalidRequest(format!("unknown collection {name}"))
