@@ -52,6 +52,7 @@ use hegel_core::shrink::{
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_forced_value,
     shrink_integer_dict_forced_value,
+    shrink_integer_list_forced_value,
     shrink_integer_list_list_forced_value,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
@@ -2744,28 +2745,28 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_integer_list_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_integer_list_forced_value(
                 integers,
                 *min_size,
-                min_value
-                    .and_then(|value| i64::try_from(value).ok())
-                    .unwrap_or(i64::MIN),
-                max_value
-                    .and_then(|value| i64::try_from(value).ok())
-                    .unwrap_or(i64::MAX),
+                min_value.and_then(|value| i64::try_from(value).ok()),
+                max_value.and_then(|value| i64::try_from(value).ok()),
                 *unique,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::IntegerList {
-                    values,
-                    min_size: *min_size,
-                    element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
-                    element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::IntegerList {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
+                            element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2956,41 +2957,6 @@ fn local_float_candidate_is_valid(
     }
     (min_value.unwrap_or(f64::NEG_INFINITY)..=max_value.unwrap_or(f64::INFINITY))
         .contains(&candidate)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<i64>,
-    min_size: usize,
-    min_value: i64,
-    max_value: i64,
-    unique: bool,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<i64>> {
-    Some(shrink_core_integer_list_observation(
-        current,
-        min_size,
-        min_value,
-        max_value,
-        unique,
-        |candidate: &[i64]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::IntegerList {
-                    values: candidate.to_vec(),
-                    min_size,
-                    element_min_value: Some(min_value),
-                    element_max_value: Some(max_value),
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
 }
 
 #[cfg(feature = "rust-core")]
