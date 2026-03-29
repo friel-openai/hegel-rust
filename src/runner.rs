@@ -39,16 +39,13 @@ use hegel_core::runtime::{
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    binary_observation, boolean_dict_observation, boolean_list_list_observation,
-    boolean_list_observation, float_list_observation,
+    fallback_shrink_observation, FallbackShrinkObservation,
     ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
     ReplayPlan as LocalReplayPlan, ReplayPlanMutation as LocalShrinkResult,
     composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
-    flatmap_integer_list_observation, has_child_span_with_label, integer_dict_observation,
-    integer_list_list_observation, integer_list_observation, integer_shrink_candidates,
-    integer_string_dict_observation, integer_tuple_list_observation, float_forced_value,
-    positive_float_as_integer_ratio, preferred_float_candidates,
+    flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
+    float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
     shrink_binary_forced_value, shrink_boolean_dict_forced_value,
@@ -65,7 +62,7 @@ use hegel_core::shrink::{
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_forced_value, shrink_string_forced_value,
-    shrink_string_list_forced_value, string_list_observation, string_observation,
+    shrink_string_list_forced_value,
     shrink_integer_tuple_list_forced_value,
 };
 #[cfg(feature = "rust-core")]
@@ -2163,23 +2160,20 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<LocalShrinkResult> {
-    match (schema, value) {
-        (
-            Schema::Float {
+    match fallback_shrink_observation(schema, value)? {
+        FallbackShrinkObservation::Float {
                 min_value,
                 max_value,
                 allow_nan,
                 allow_infinity,
-                ..
-            },
-            DataValue::Float(value),
-        ) => shrink_float_observation(
+                value,
+        } => shrink_float_observation(
             seed,
-            *value,
-            *min_value,
-            *max_value,
-            *allow_nan,
-            *allow_infinity,
+            value,
+            min_value,
+            max_value,
+            allow_nan,
+            allow_infinity,
             test_fn,
             verbosity,
             got_interesting,
@@ -2187,15 +2181,15 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
         .map(|value| LocalShrinkResult {
             forced_value: float_forced_value(
                 value,
-                *min_value,
-                *max_value,
-                *allow_nan,
-                *allow_infinity,
+                min_value,
+                max_value,
+                allow_nan,
+                allow_infinity,
             ),
             downgraded_primary_bytes: Vec::new(),
         }),
-        (Schema::Boolean { .. }, DataValue::Boolean(value)) => Some(LocalShrinkResult {
-            forced_value: shrink_boolean_forced_value(*value, |candidate| {
+        FallbackShrinkObservation::Boolean(value) => Some(LocalShrinkResult {
+            forced_value: shrink_boolean_forced_value(value, |candidate| {
                     local_boolean_candidate_is_interesting(
                         seed,
                         replay_choices,
@@ -2207,17 +2201,15 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 }),
             downgraded_primary_bytes: Vec::new(),
         }),
-        (
-            Schema::Integer {
+        FallbackShrinkObservation::Integer {
                 min_value,
-            max_value,
-            },
-            DataValue::Integer(value),
-        ) => Some(LocalShrinkResult {
+                max_value,
+                value,
+        } => Some(LocalShrinkResult {
             forced_value: shrink_integer_forced_value(
-                *value,
-                *min_value,
-                *max_value,
+                value,
+                min_value,
+                max_value,
                 |candidate| {
                     local_integer_candidate_is_interesting(
                         seed,
@@ -2231,20 +2223,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             ),
             downgraded_primary_bytes: Vec::new(),
         }),
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size,
-                unique,
-            },
-            DataValue::List(values),
-        ) if matches!(
-            elements.as_ref(),
-            Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
-        ) =>
-        {
-            let observation = integer_tuple_list_observation(schema, value)?;
+        FallbackShrinkObservation::IntegerTupleList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_tuple_list_forced_value(
                     observation.values,
@@ -2271,23 +2250,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size,
-                unique: _,
-            },
-            DataValue::List(values),
-        ) if matches!(
-            elements.as_ref(),
-            Schema::List {
-                elements,
-                ..
-            } if matches!(elements.as_ref(), Schema::Integer { .. })
-        ) =>
-        {
-            let observation = integer_list_list_observation(schema, value)?;
+        FallbackShrinkObservation::IntegerListList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_list_list_forced_value(
                     observation.values,
@@ -2316,18 +2279,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::Dict {
-                keys,
-                values: dict_values,
-                min_size,
-                ..
-            },
-            DataValue::Dict(values),
-        ) if matches!(keys.as_ref(), Schema::Integer { .. })
-            && matches!(dict_values.as_ref(), Schema::Integer { .. }) =>
-        {
-            let observation = integer_dict_observation(schema, value)?;
+        FallbackShrinkObservation::IntegerDict(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_dict_forced_value(
                     observation.values,
@@ -2356,18 +2308,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::Dict {
-                keys,
-                values: dict_values,
-                min_size,
-                ..
-            },
-            DataValue::Dict(values),
-        ) if matches!(keys.as_ref(), Schema::Integer { .. })
-            && matches!(dict_values.as_ref(), Schema::String { .. }) =>
-        {
-            let observation = integer_string_dict_observation(schema, value)?;
+        FallbackShrinkObservation::IntegerStringDict(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_string_dict_forced_value(
                     observation.values,
@@ -2394,18 +2335,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::Dict {
-                keys,
-                values: dict_values,
-                min_size,
-                ..
-            },
-            DataValue::Dict(values),
-        ) if matches!(keys.as_ref(), Schema::Boolean { .. })
-            && matches!(dict_values.as_ref(), Schema::Boolean { .. }) =>
-        {
-            let observation = boolean_dict_observation(schema, value)?;
+        FallbackShrinkObservation::BooleanDict(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_boolean_dict_forced_value(
                     observation.values,
@@ -2426,23 +2356,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size,
-                unique: _,
-            },
-            DataValue::List(values),
-        ) if matches!(
-            elements.as_ref(),
-            Schema::List {
-                elements,
-                ..
-            } if matches!(elements.as_ref(), Schema::Boolean { .. })
-        ) =>
-        {
-            let observation = boolean_list_list_observation(schema, value)?;
+        FallbackShrinkObservation::BooleanListList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_boolean_list_list_forced_value(
                     observation.values,
@@ -2467,16 +2381,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size,
-                unique: _,
-            },
-            DataValue::List(values),
-        ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
-            let observation = boolean_list_observation(schema, value)?;
+        FallbackShrinkObservation::BooleanList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_boolean_list_forced_value(
                     observation.values,
@@ -2499,16 +2404,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size: _,
-                unique: _,
-            },
-            DataValue::List(values),
-        ) if matches!(elements.as_ref(), Schema::Float { .. }) => {
-            let observation = float_list_observation(schema, value)?;
+        FallbackShrinkObservation::FloatList(observation) => {
             let (forced_value, downgraded_primary_bytes) = shrink_float_list_forced_value(
                 observation.values,
                 initial_primary_bytes.to_vec(),
@@ -2540,16 +2436,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes,
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size: _,
-                unique,
-            },
-            DataValue::List(values),
-        ) if matches!(elements.as_ref(), Schema::Integer { .. }) => {
-            let observation = integer_list_observation(schema, value)?;
+        FallbackShrinkObservation::IntegerList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_list_forced_value(
                     observation.values,
@@ -2575,8 +2462,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (Schema::Binary { .. }, DataValue::Binary(value)) => {
-            let observation = binary_observation(schema, &DataValue::Binary(value.clone()))?;
+        FallbackShrinkObservation::Binary(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_binary_forced_value(
                     observation.value,
@@ -2599,8 +2485,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (Schema::String { .. }, DataValue::String(value)) => {
-            let observation = string_observation(schema, &DataValue::String(value.clone()))?;
+        FallbackShrinkObservation::String(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_string_forced_value(
                     observation.value,
@@ -2623,16 +2508,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (
-            Schema::List {
-                elements,
-                min_size,
-                max_size: _,
-                unique: _,
-            },
-            DataValue::List(values),
-        ) if matches!(elements.as_ref(), Schema::String { .. }) => {
-            let observation = string_list_observation(schema, value)?;
+        FallbackShrinkObservation::StringList(observation) => {
             Some(LocalShrinkResult {
                 forced_value: shrink_string_list_forced_value(
                     observation.values,
@@ -2657,7 +2533,6 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        _ => None,
     }
 }
 
