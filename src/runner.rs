@@ -44,6 +44,7 @@ use hegel_core::shrink::{
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation,
+    shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
     shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
 };
@@ -1209,6 +1210,28 @@ where
                         if plan.forced_prefix_values.len() >= 2 {
                             plan.forced_prefix_values[1] = forced_second_value;
                         }
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_integer_pair_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_separated_integer_pair_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
                     } else if let Some(replay_choices) =
                         observed_values.first().and_then(|(schema, value)| {
                             shrink_local_one_of_observation(
@@ -1574,6 +1597,134 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
         },
         DataValue::Integer(current_scalar),
     ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_integer_pair_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (
+            Schema::Integer {
+                min_value: first_min_value,
+                max_value: first_max_value,
+            },
+            DataValue::Integer(first),
+        ),
+        (
+            Schema::Integer {
+                min_value: second_min_value,
+                max_value: second_max_value,
+            },
+            DataValue::Integer(second),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+
+    let shrunk = shrink_core_integer_pair_observation(
+        [*first, *second],
+        [
+            first_min_value.unwrap_or(i64::MIN),
+            second_min_value.unwrap_or(i64::MIN),
+        ],
+        [
+            first_max_value.unwrap_or(i64::MAX),
+            second_max_value.unwrap_or(i64::MAX),
+        ],
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(candidate[0]),
+                    DataValue::Integer(candidate[1]),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+
+    Some(vec![
+        DataValue::Integer(shrunk[0]),
+        DataValue::Integer(shrunk[1]),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (
+            Schema::Integer {
+                min_value: first_min_value,
+                max_value: first_max_value,
+            },
+            DataValue::Integer(first),
+        ),
+        (middle_text_schema @ Schema::String { .. }, _),
+        (middle_bool_schema @ Schema::Boolean { .. }, _),
+        (middle_integer_schema @ Schema::Integer { .. }, _),
+        (
+            Schema::Integer {
+                min_value: second_min_value,
+                max_value: second_max_value,
+            },
+            DataValue::Integer(second),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+
+    let middle_text = generate_simplest_value(middle_text_schema).ok()?;
+    let middle_bool = generate_simplest_value(middle_bool_schema).ok()?;
+    let middle_integer = generate_simplest_value(middle_integer_schema).ok()?;
+    let shrunk = shrink_core_integer_pair_observation(
+        [*first, *second],
+        [
+            first_min_value.unwrap_or(i64::MIN),
+            second_min_value.unwrap_or(i64::MIN),
+        ],
+        [
+            first_max_value.unwrap_or(i64::MAX),
+            second_max_value.unwrap_or(i64::MAX),
+        ],
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(candidate[0]),
+                    middle_text.clone(),
+                    middle_bool.clone(),
+                    middle_integer.clone(),
+                    DataValue::Integer(candidate[1]),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+
+    Some(vec![
+        DataValue::Integer(shrunk[0]),
+        middle_text,
+        middle_bool,
+        middle_integer,
+        DataValue::Integer(shrunk[1]),
+    ])
 }
 
 #[cfg(feature = "rust-core")]
