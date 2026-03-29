@@ -34,6 +34,7 @@ use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
     float_choice_index, preferred_float_candidates,
+    shrink_boolean_list_observation as shrink_core_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
@@ -1320,6 +1321,11 @@ enum ForcedLocalValue {
         element_min_value: Option<i64>,
         element_max_value: Option<i64>,
     },
+    BooleanList {
+        values: Vec<bool>,
+        min_size: usize,
+        max_size: Option<usize>,
+    },
     FloatList {
         values: Vec<f64>,
         min_size: usize,
@@ -1354,6 +1360,9 @@ impl ForcedLocalValue {
             Self::Integer { value, .. } => DataValue::Integer(value),
             Self::IntegerList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Integer).collect())
+            }
+            Self::BooleanList { values, .. } => {
+                DataValue::List(values.into_iter().map(DataValue::Boolean).collect())
             }
             Self::FloatList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Float).collect())
@@ -1400,6 +1409,21 @@ impl ForcedLocalValue {
                     ) as u128);
                 }
                 indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::BooleanList {
+                values,
+                min_size,
+                max_size,
+            } => {
+                let mut indices = Vec::with_capacity(values.len().saturating_mul(2).saturating_add(1));
+                for (index, value) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    indices.push(u128::from(*value));
+                }
+                if max_size.is_none_or(|max_size| values.len() < max_size) {
+                    indices.push(0);
+                }
                 (indices.len(), indices)
             }
             Self::FloatList {
@@ -1537,6 +1561,40 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             Schema::List {
                 elements,
                 min_size,
+                max_size,
+                unique: _,
+            },
+            DataValue::List(values),
+        ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
+            let booleans = values
+                .iter()
+                .map(|value| match value {
+                    DataValue::Boolean(value) => Some(*value),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_boolean_list_observation(
+                seed,
+                booleans,
+                *min_size,
+                *max_size,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::BooleanList {
+                    values,
+                    min_size: *min_size,
+                    max_size: *max_size,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
+        (
+            Schema::List {
+                elements,
+                min_size,
                 max_size: _,
                 unique: _,
             },
@@ -1589,7 +1647,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 elements,
                 min_size,
                 max_size: _,
-                unique: _,
+                unique,
             },
             DataValue::List(values),
         ) if matches!(elements.as_ref(), Schema::Integer { .. }) => {
@@ -1613,6 +1671,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 *min_size,
                 min_value.unwrap_or(i64::MIN),
                 max_value.unwrap_or(i64::MAX),
+                *unique,
                 test_fn,
                 verbosity,
                 got_interesting,
@@ -1743,6 +1802,35 @@ fn shrink_float_observation<F: FnMut(TestCase)>(
         }
     }
     Some(current)
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_boolean_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<bool>,
+    min_size: usize,
+    max_size: Option<usize>,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<bool>> {
+    Some(shrink_core_boolean_list_observation(
+        current,
+        min_size,
+        |candidate| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::BooleanList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    max_size,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
 }
 
 #[cfg(feature = "rust-core")]
@@ -2021,6 +2109,7 @@ fn shrink_integer_list_observation<F: FnMut(TestCase)>(
     min_size: usize,
     min_value: i64,
     max_value: i64,
+    unique: bool,
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
@@ -2030,7 +2119,8 @@ fn shrink_integer_list_observation<F: FnMut(TestCase)>(
         min_size,
         min_value,
         max_value,
-        |candidate| {
+        unique,
+        |candidate: &[i64]| {
             local_value_candidate_is_interesting(
                 seed,
                 &ForcedLocalValue::IntegerList {

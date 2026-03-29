@@ -457,6 +457,21 @@ impl LocalBackend {
                     ..
                 },
                 first_choice,
+            ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
+                self.replay_choices.push_front(first_choice);
+                match self.replay_boolean_list_choice(elements, *min_size, *max_size)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
+            (
+                Schema::List {
+                    elements,
+                    min_size,
+                    max_size,
+                    ..
+                },
+                first_choice,
             ) if matches!(elements.as_ref(), Schema::Float { .. }) => {
                 self.replay_choices.push_front(first_choice);
                 match self.replay_float_list_choice(elements, *min_size, *max_size)? {
@@ -539,6 +554,17 @@ impl LocalBackend {
                     ..
                 },
                 DataValue::List(values),
+            ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
+                self.record_boolean_list_choices(*min_size, *max_size, values);
+            }
+            (
+                Schema::List {
+                    elements,
+                    min_size,
+                    max_size,
+                    ..
+                },
+                DataValue::List(values),
             ) if matches!(elements.as_ref(), Schema::Float { .. }) => {
                 self.record_float_list_choices(elements, *min_size, *max_size, values);
             }
@@ -598,6 +624,53 @@ impl LocalBackend {
             )));
         }
         Ok(DataValue::Integer(value))
+    }
+
+    fn replay_boolean_list_choice(
+        &mut self,
+        _elements: &Schema,
+        min_size: usize,
+        max_size: Option<usize>,
+    ) -> Result<Option<DataValue>, LocalBackendError> {
+        let saved = self.replay_choices.clone();
+        let mut values = Vec::new();
+
+        loop {
+            let count = values.len();
+            let should_continue = if count < min_size {
+                true
+            } else if max_size.is_some_and(|max_size| count >= max_size) {
+                false
+            } else {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(should_continue) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                should_continue
+            };
+
+            if !should_continue {
+                break;
+            }
+
+            let Some(choice) = self.replay_choices.pop_front() else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean list ended early".to_owned(),
+                ));
+            };
+            let Choice::Boolean(value) = choice else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean list contained a non-boolean choice".to_owned(),
+                ));
+            };
+            values.push(DataValue::Boolean(value));
+        }
+
+        Ok(Some(DataValue::List(values)))
     }
 
     fn replay_integer_list_choice(
@@ -829,6 +902,26 @@ impl LocalBackend {
             self.recorded_choices.push(Choice::Integer(*value));
         }
 
+        if max_size.is_none_or(|max_size| values.len() < max_size) {
+            self.recorded_choices.push(Choice::Boolean(false));
+        }
+    }
+
+    fn record_boolean_list_choices(
+        &mut self,
+        min_size: usize,
+        max_size: Option<usize>,
+        values: &[DataValue],
+    ) {
+        for (index, value) in values.iter().enumerate() {
+            if index >= min_size {
+                self.recorded_choices.push(Choice::Boolean(true));
+            }
+            let DataValue::Boolean(value) = value else {
+                return;
+            };
+            self.recorded_choices.push(Choice::Boolean(*value));
+        }
         if max_size.is_none_or(|max_size| values.len() < max_size) {
             self.recorded_choices.push(Choice::Boolean(false));
         }
