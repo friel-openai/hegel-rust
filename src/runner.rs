@@ -30,6 +30,8 @@ use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex
 #[cfg(feature = "rust-core")]
 use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
+use hegel_core::runtime::save_corpus_replacement;
+#[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -515,21 +517,19 @@ impl LocalExampleDatabase {
     fn secondary_key(&self, key: &[u8]) -> Vec<u8> {
         self.inner.secondary_key(key)
     }
-}
 
-#[cfg(feature = "rust-core")]
-fn clear_local_secondary_key(
-    database: &LocalExampleDatabase,
-    secondary_key: &[u8],
-    primary_upper_bound: &[u8],
-) {
-    let mut corpus = database.fetch(secondary_key);
-    shortlex_sort(&mut corpus);
-    for existing in corpus {
-        if shortlex_cmp(&existing, primary_upper_bound) == CmpOrdering::Greater {
-            break;
-        }
-        database.delete(secondary_key, &existing);
+    fn save_corpus_replacement(
+        &self,
+        database_key: &[u8],
+        primary_bytes: &[u8],
+        demoted_primary_bytes: &[Vec<u8>],
+    ) {
+        let _ = save_corpus_replacement(
+            &self.inner,
+            database_key,
+            primary_bytes,
+            demoted_primary_bytes,
+        );
     }
 }
 
@@ -1244,22 +1244,13 @@ where
             (&database, database_key, best_final_choices.as_ref())
         {
             let bytes = choices_to_bytes(choices);
-            let secondary_key = database.secondary_key(database_key);
-            clear_local_secondary_key(database, &secondary_key, &bytes);
-            if saved_primary_by_origin
-                .values()
-                .all(|existing| existing != &bytes)
-            {
-                database.save(database_key, &bytes);
-            }
-            let mut saved_secondary = std::collections::HashSet::new();
-            for previous_primary in downgraded_primary_bytes {
-                if previous_primary == bytes || !saved_secondary.insert(previous_primary.clone()) {
+            for previous_primary in &downgraded_primary_bytes {
+                if previous_primary == &bytes {
                     continue;
                 }
                 append_local_history_trace("saved-secondary", &previous_primary);
-                database.move_value(database_key, &secondary_key, &previous_primary);
             }
+            database.save_corpus_replacement(database_key, &bytes, &downgraded_primary_bytes);
         }
 
         if got_interesting.load(Ordering::SeqCst) {
