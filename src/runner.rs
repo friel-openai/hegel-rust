@@ -28,15 +28,13 @@ use crate::local_backend::LocalBackend;
 #[cfg(feature = "rust-core")]
 use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex_cmp};
 #[cfg(feature = "rust-core")]
-use hegel_core::schema::{DataValue, Schema};
+use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
-use sha2::{Digest, Sha384};
+use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
 #[cfg(feature = "rust-core")]
 use std::io::Write;
-#[cfg(feature = "rust-core")]
-use std::path::PathBuf;
 
 const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.6, 0.7);
 const HEGEL_SERVER_VERSION: &str = "0.2.3";
@@ -487,76 +485,35 @@ enum Database {
 
 #[cfg(feature = "rust-core")]
 struct LocalExampleDatabase {
-    root: PathBuf,
+    inner: ExampleDatabase,
 }
 
 #[cfg(feature = "rust-core")]
 impl LocalExampleDatabase {
-    const METAKEYS_NAME: &'static [u8] = b".hypothesis-keys";
-    const SECONDARY_SUFFIX: &'static [u8] = b".secondary";
-
-    fn new(path: impl Into<PathBuf>) -> Self {
-        Self { root: path.into() }
+    fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            inner: ExampleDatabase::new(path),
+        }
     }
 
     fn fetch(&self, key: &[u8]) -> Vec<Vec<u8>> {
-        let key_path = self.key_path(key);
-        let Ok(entries) = std::fs::read_dir(key_path) else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| std::fs::read(entry.path()).ok())
-            .collect()
+        self.inner.fetch(key).unwrap_or_default()
     }
 
     fn save(&self, key: &[u8], value: &[u8]) {
-        let key_path = self.key_path(key);
-        if key != Self::METAKEYS_NAME && !key_path.exists() {
-            self.save(Self::METAKEYS_NAME, key);
-        }
-        if std::fs::create_dir_all(&key_path).is_err() {
-            return;
-        }
-        let value_path = key_path.join(hash_bytes(value));
-        if value_path.exists() {
-            return;
-        }
-        let _ = std::fs::write(value_path, value);
+        let _ = self.inner.save(key, value);
     }
 
     fn move_value(&self, from_key: &[u8], to_key: &[u8], value: &[u8]) {
-        self.save(to_key, value);
-        self.delete(from_key, value);
+        let _ = self.inner.move_value(from_key, to_key, value);
     }
 
     fn delete(&self, key: &[u8], value: &[u8]) {
-        let value_path = self.key_path(key).join(hash_bytes(value));
-        if std::fs::remove_file(&value_path).is_err() {
-            return;
-        }
-        let key_path = self.key_path(key);
-        if key_path
-            .read_dir()
-            .ok()
-            .is_some_and(|mut entries| entries.next().is_none())
-        {
-            let _ = std::fs::remove_dir(&key_path);
-            if key != Self::METAKEYS_NAME {
-                self.delete(Self::METAKEYS_NAME, key);
-            }
-        }
+        let _ = self.inner.delete(key, value);
     }
 
     fn secondary_key(&self, key: &[u8]) -> Vec<u8> {
-        let mut secondary = Vec::with_capacity(key.len() + Self::SECONDARY_SUFFIX.len());
-        secondary.extend_from_slice(key);
-        secondary.extend_from_slice(Self::SECONDARY_SUFFIX);
-        secondary
-    }
-
-    fn key_path(&self, key: &[u8]) -> PathBuf {
-        self.root.join(hash_bytes(key))
+        self.inner.secondary_key(key)
     }
 }
 
@@ -574,15 +531,6 @@ fn clear_local_secondary_key(
         }
         database.delete(secondary_key, &existing);
     }
-}
-
-#[cfg(feature = "rust-core")]
-fn hash_bytes(bytes: &[u8]) -> String {
-    let digest = Sha384::digest(bytes);
-    digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 #[cfg(feature = "rust-core")]
