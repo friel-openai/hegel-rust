@@ -41,6 +41,7 @@ use hegel_core::shrink::{
     ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation,
     flatmap_integer_list_observation, has_child_span_with_label, preferred_float_candidates,
+    select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -1154,29 +1155,7 @@ where
         }
 
         let mut final_result: Option<TestCaseResult> = None;
-        let final_plans = if self.settings.derandomize {
-            let mut best_by_origin: std::collections::HashMap<String, LocalReplayPlan> =
-                std::collections::HashMap::new();
-            for plan in replay_plans
-                .iter()
-                .filter(|plan| plan.sort_key().is_some())
-                .cloned()
-            {
-                match best_by_origin.get(&plan.origin) {
-                    Some(existing) if existing.sort_key().as_ref() <= plan.sort_key().as_ref() => {}
-                    _ => {
-                        best_by_origin.insert(plan.origin.clone(), plan);
-                    }
-                }
-            }
-            if best_by_origin.is_empty() {
-                replay_plans
-            } else {
-                best_by_origin.into_values().collect()
-            }
-        } else {
-            replay_plans
-        };
+        let final_plans = select_best_replay_plans(replay_plans, self.settings.derandomize);
         let mut best_final_choices: Option<Vec<Choice>> = None;
         let mut best_final_bytes: Option<Vec<u8>> = None;
         let mut best_final_display_plan: Option<LocalReplayPlan> = None;
@@ -1410,15 +1389,9 @@ where
                         downgraded_primary_bytes.push(existing.clone());
                     }
                     best_final_bytes = Some(recorded_bytes.clone());
-                    best_final_choices = Some(recorded_choices);
+                    best_final_choices = Some(recorded_choices.clone());
                 }
-                let display_sort_key = {
-                    let recorded_bytes = recorded_bytes.clone();
-                    ExampleSortKey::from_parts(
-                        recorded_bytes.len(),
-                        recorded_bytes.into_iter().map(u128::from).collect(),
-                    )
-                };
+                let display_sort_key = ExampleSortKey::from_choices(&recorded_choices);
                 if best_final_display_sort_key
                     .as_ref()
                     .is_none_or(|existing| &display_sort_key < existing)
