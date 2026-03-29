@@ -8,6 +8,8 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use crate::generators::value;
+#[cfg(feature = "rust-core")]
+use crate::local_backend::{LocalBackend, LocalBackendError};
 
 // We use the __IsTestCase trait internally to provide nice error messages for misuses of #[composite].
 // It should not be used by users.
@@ -52,13 +54,27 @@ pub(crate) const ASSUME_FAIL_STRING: &str = "__HEGEL_ASSUME_FAIL";
 /// assumption failures apart from server-initiated data exhaustion.
 pub(crate) const STOP_TEST_STRING: &str = "__HEGEL_STOP_TEST";
 
+enum RequestOutcome {
+    Response(Value),
+    StopTest,
+    ServerCrashed,
+    Error(String),
+}
+
 pub(crate) struct TestCaseGlobalData {
-    #[allow(dead_code)]
-    connection: Arc<Connection>,
-    channel: Channel,
+    backend: Backend,
     verbosity: Verbosity,
     is_last_run: bool,
     test_aborted: bool,
+}
+
+enum Backend {
+    Remote {
+        connection: Arc<Connection>,
+        channel: Channel,
+    },
+    #[cfg(feature = "rust-core")]
+    Local { backend: Rc<RefCell<LocalBackend>> },
 }
 
 #[derive(Clone)]
@@ -107,7 +123,7 @@ impl std::fmt::Debug for TestCase {
 }
 
 impl TestCase {
-    pub(crate) fn new(
+    pub(crate) fn new_remote(
         connection: Arc<Connection>,
         channel: Channel,
         verbosity: Verbosity,
@@ -120,8 +136,37 @@ impl TestCase {
         };
         TestCase {
             global: Rc::new(RefCell::new(TestCaseGlobalData {
-                connection,
-                channel,
+                backend: Backend::Remote {
+                    connection,
+                    channel,
+                },
+                verbosity,
+                is_last_run,
+                test_aborted: false,
+            })),
+            local: RefCell::new(TestCaseLocalData {
+                span_depth: 0,
+                draw_count: 0,
+                indent: 0,
+                on_draw,
+            }),
+        }
+    }
+
+    #[cfg(feature = "rust-core")]
+    pub(crate) fn new_local(
+        backend: Rc<RefCell<LocalBackend>>,
+        verbosity: Verbosity,
+        is_last_run: bool,
+    ) -> Self {
+        let on_draw: Rc<dyn Fn(&str)> = if is_last_run {
+            Rc::new(|msg| eprintln!("{}", msg))
+        } else {
+            Rc::new(|_| {})
+        };
+        TestCase {
+            global: Rc::new(RefCell::new(TestCaseGlobalData {
+                backend: Backend::Local { backend },
                 verbosity,
                 is_last_run,
                 test_aborted: false,
@@ -288,46 +333,64 @@ impl TestCase {
             eprintln!("REQUEST: {:?}", request);
         }
 
-        let result = global.channel.request_cbor(&request);
+        let outcome = match &mut global.backend {
+            Backend::Remote {
+                connection,
+                channel,
+            } => match channel.request_cbor(&request) {
+                Ok(response) => RequestOutcome::Response(response),
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    if error_msg.contains("overflow")
+                        || error_msg.contains("StopTest")
+                        || error_msg.contains("channel is closed")
+                    {
+                        if debug {
+                            eprintln!("RESPONSE: StopTest/overflow");
+                        }
+                        channel.mark_closed();
+                        RequestOutcome::StopTest
+                    } else if error_msg.contains("FlakyStrategyDefinition")
+                        || error_msg.contains("FlakyReplay")
+                    {
+                        // Abort the test case; the server will report the flaky
+                        // error in the test_done results, which runner.rs handles.
+                        channel.mark_closed();
+                        RequestOutcome::StopTest
+                    } else if connection.server_has_exited() {
+                        RequestOutcome::ServerCrashed
+                    } else {
+                        RequestOutcome::Error(e.to_string())
+                    }
+                }
+            },
+            #[cfg(feature = "rust-core")]
+            Backend::Local { backend } => {
+                let result = backend.borrow_mut().handle_request(&request);
+                match result {
+                    Ok(response) => RequestOutcome::Response(response),
+                    Err(LocalBackendError::StopTest) => RequestOutcome::StopTest,
+                    Err(LocalBackendError::InvalidRequest(error)) => RequestOutcome::Error(
+                        format!("Failed to communicate with local Hegel backend: {}", error),
+                    ),
+                }
+            }
+        };
+        if matches!(outcome, RequestOutcome::StopTest) {
+            global.test_aborted = true;
+        }
         drop(global);
 
-        match result {
-            Ok(response) => {
+        match outcome {
+            RequestOutcome::Response(response) => {
                 if debug {
                     eprintln!("RESPONSE: {:?}", response);
                 }
                 Ok(response)
             }
-            Err(e) => {
-                let error_msg = e.to_string();
-                if error_msg.contains("overflow")
-                    || error_msg.contains("StopTest")
-                    || error_msg.contains("channel is closed")
-                {
-                    if debug {
-                        eprintln!("RESPONSE: StopTest/overflow");
-                    }
-                    let mut global = self.global.borrow_mut();
-                    global.channel.mark_closed();
-                    global.test_aborted = true;
-                    drop(global);
-                    Err(StopTestError)
-                } else if error_msg.contains("FlakyStrategyDefinition")
-                    || error_msg.contains("FlakyReplay")
-                {
-                    // Abort the test case; the server will report the flaky
-                    // error in the test_done results, which runner.rs handles.
-                    let mut global = self.global.borrow_mut();
-                    global.channel.mark_closed();
-                    global.test_aborted = true;
-                    drop(global);
-                    Err(StopTestError)
-                } else if self.global.borrow().connection.server_has_exited() {
-                    panic!("{}", SERVER_CRASHED_MESSAGE);
-                } else {
-                    panic!("Failed to communicate with Hegel: {}", e);
-                }
-            }
+            RequestOutcome::StopTest => Err(StopTestError),
+            RequestOutcome::ServerCrashed => panic!("{}", SERVER_CRASHED_MESSAGE),
+            RequestOutcome::Error(error) => panic!("{}", error),
         }
     }
 
@@ -339,8 +402,14 @@ impl TestCase {
 
     pub(crate) fn send_mark_complete(&self, mark_complete: &Value) {
         let mut global = self.global.borrow_mut();
-        let _ = global.channel.request_cbor(mark_complete);
-        let _ = global.channel.close();
+        match &mut global.backend {
+            Backend::Remote { channel, .. } => {
+                let _ = channel.request_cbor(mark_complete);
+                let _ = channel.close();
+            }
+            #[cfg(feature = "rust-core")]
+            Backend::Local { .. } => {}
+        }
     }
 }
 

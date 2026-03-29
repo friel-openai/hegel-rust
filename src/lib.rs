@@ -189,6 +189,8 @@ pub(crate) mod antithesis;
 pub(crate) mod cbor_utils;
 pub(crate) mod control;
 pub mod generators;
+#[cfg(feature = "rust-core")]
+pub(crate) mod local_backend;
 pub(crate) mod protocol;
 pub(crate) mod runner;
 pub mod stateful;
