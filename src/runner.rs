@@ -28,6 +28,8 @@ use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex
 #[cfg(feature = "rust-core")]
 use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
+use hegel_core::engine::generate_simplest_value;
+#[cfg(feature = "rust-core")]
 use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_replacement};
 #[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
@@ -1207,6 +1209,21 @@ where
                         if plan.forced_prefix_values.len() >= 2 {
                             plan.forced_prefix_values[1] = forced_second_value;
                         }
+                    } else if let Some(replay_choices) =
+                        observed_values.first().and_then(|(schema, value)| {
+                            shrink_local_one_of_observation(
+                                plan.seed.unwrap_or(0),
+                                schema,
+                                value,
+                                &mut test_fn,
+                                verbosity,
+                                &got_interesting,
+                            )
+                        })
+                    {
+                        plan.replay_choices = Some(replay_choices);
+                        plan.forced_prefix_values = Vec::new();
+                        plan.forced_value = None;
                     } else if let Some(result) =
                         backend
                             .borrow()
@@ -1557,6 +1574,51 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
         },
         DataValue::Integer(current_scalar),
     ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    schema: &Schema,
+    value: &DataValue,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Choice>> {
+    let Schema::OneOf { options } = schema else {
+        return None;
+    };
+    let current_index = options
+        .iter()
+        .position(|option| hegel_core::engine::value_conforms_to_schema(value, option))?;
+
+    for option in &options[..current_index] {
+        let candidate = generate_simplest_value(option).ok()?;
+        let backend = Rc::new(RefCell::new(LocalBackend::from_seed(seed)));
+        backend.borrow_mut().force_first_value(candidate.clone());
+        let is_interesting = matches!(
+            run_test_case(
+                TestBackend::Local {
+                    backend: Rc::clone(&backend),
+                },
+                test_fn,
+                false,
+                verbosity,
+                got_interesting,
+            ),
+            TestCaseResult::Interesting { .. }
+        );
+        if is_interesting
+            && backend
+                .borrow()
+                .observed_first_value()
+                .is_some_and(|(_, observed_value)| observed_value.same_observed_value(&candidate))
+        {
+            return Some(backend.borrow().recorded_choices().to_vec());
+        }
+    }
+
+    None
 }
 
 #[cfg(feature = "rust-core")]

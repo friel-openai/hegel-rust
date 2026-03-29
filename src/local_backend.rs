@@ -397,11 +397,32 @@ impl LocalBackend {
         &mut self,
         schema: &Schema,
     ) -> Result<Option<DataValue>, LocalBackendError> {
+        if let Schema::Const { value } = schema {
+            return Ok(Some(value.clone()));
+        }
+
         let Some(choice) = self.replay_choices.pop_front() else {
             return Ok(None);
         };
 
         let value = match (schema, choice) {
+            (Schema::OneOf { options }, Choice::Integer(index)) => {
+                let index = usize::try_from(index).map_err(|_| {
+                    LocalBackendError::InvalidRequest(format!(
+                        "replayed one_of index {index} is negative"
+                    ))
+                })?;
+                let Some(option) = options.get(index) else {
+                    return Err(LocalBackendError::InvalidRequest(format!(
+                        "replayed one_of index {index} is out of range for {} options",
+                        options.len()
+                    )));
+                };
+                match self.replay_value_choice(option)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
             (Schema::Boolean { .. }, Choice::Boolean(value)) => DataValue::Boolean(value),
             (
                 Schema::Integer {
@@ -574,6 +595,21 @@ impl LocalBackend {
                     ..
                 },
                 first_choice,
+            ) if matches!(elements.as_ref(), Schema::OneOf { .. }) => {
+                self.replay_choices.push_front(first_choice);
+                match self.replay_generic_list_choice(elements, *min_size, *max_size)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
+            (
+                Schema::List {
+                    elements,
+                    min_size,
+                    max_size,
+                    ..
+                },
+                first_choice,
             ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
                 self.replay_choices.push_front(first_choice);
                 match self.replay_boolean_list_choice(elements, *min_size, *max_size)? {
@@ -637,6 +673,13 @@ impl LocalBackend {
                     None => return Ok(None),
                 }
             }
+            (Schema::Tuple { elements }, first_choice) => {
+                self.replay_choices.push_front(first_choice);
+                match self.replay_generic_tuple_choice(elements)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
             (_, choice) => {
                 self.replay_choices.push_front(choice);
                 return Ok(None);
@@ -648,6 +691,16 @@ impl LocalBackend {
 
     fn record_choice_for_value(&mut self, schema: &Schema, value: &DataValue) {
         match (schema, value) {
+            (Schema::OneOf { options }, value) => {
+                if let Some((index, option)) = options
+                    .iter()
+                    .enumerate()
+                    .find(|(_, option)| value_conforms_to_schema(value, option))
+                {
+                    self.recorded_choices.push(Choice::Integer(index as i64));
+                    self.record_choice_for_value(option, value);
+                }
+            }
             (Schema::Boolean { .. }, DataValue::Boolean(value)) => {
                 self.recorded_choices.push(Choice::Boolean(*value));
             }
@@ -767,6 +820,17 @@ impl LocalBackend {
                     ..
                 },
                 DataValue::List(values),
+            ) if matches!(elements.as_ref(), Schema::OneOf { .. }) => {
+                self.record_generic_list_choices(elements, *min_size, *max_size, values);
+            }
+            (
+                Schema::List {
+                    elements,
+                    min_size,
+                    max_size,
+                    ..
+                },
+                DataValue::List(values),
             ) if matches!(elements.as_ref(), Schema::Boolean { .. }) => {
                 self.record_boolean_list_choices(*min_size, *max_size, values);
             }
@@ -811,6 +875,11 @@ impl LocalBackend {
             {
                 self.record_integer_tuple_choices(elements, values);
             }
+            (Schema::Tuple { elements }, DataValue::Tuple(values))
+                if elements.len() == values.len() =>
+            {
+                self.record_generic_tuple_choices(elements, values);
+            }
             _ => {}
         }
     }
@@ -837,6 +906,47 @@ impl LocalBackend {
             )));
         }
         Ok(DataValue::Integer(value))
+    }
+
+    fn replay_generic_list_choice(
+        &mut self,
+        elements: &Schema,
+        min_size: usize,
+        max_size: Option<usize>,
+    ) -> Result<Option<DataValue>, LocalBackendError> {
+        let saved = self.replay_choices.clone();
+        let mut values = Vec::new();
+
+        loop {
+            let count = values.len();
+            let should_continue = if count < min_size {
+                true
+            } else if max_size.is_some_and(|max_size| count >= max_size) {
+                false
+            } else {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(should_continue) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                should_continue
+            };
+
+            if !should_continue {
+                break;
+            }
+
+            let Some(value) = self.replay_value_choice(elements)? else {
+                self.replay_choices = saved;
+                return Ok(None);
+            };
+            values.push(value);
+        }
+
+        Ok(Some(DataValue::List(values)))
     }
 
     fn replay_boolean_list_choice(
@@ -1228,6 +1338,27 @@ impl LocalBackend {
         }
     }
 
+    fn record_generic_list_choices(
+        &mut self,
+        elements: &Schema,
+        min_size: usize,
+        max_size: Option<usize>,
+        values: &[DataValue],
+    ) {
+        if values.len() < min_size || max_size.is_some_and(|max_size| values.len() > max_size) {
+            return;
+        }
+        for (index, value) in values.iter().enumerate() {
+            if index >= min_size {
+                self.recorded_choices.push(Choice::Boolean(true));
+            }
+            self.record_choice_for_value(elements, value);
+        }
+        if max_size.is_none_or(|max_size| values.len() < max_size) {
+            self.recorded_choices.push(Choice::Boolean(false));
+        }
+    }
+
     fn record_integer_list_list_choices(
         &mut self,
         elements: &Schema,
@@ -1388,6 +1519,22 @@ impl LocalBackend {
                 return Ok(None);
             };
             values.push(self.replay_integer_element(element, value)?);
+        }
+        Ok(Some(DataValue::Tuple(values)))
+    }
+
+    fn replay_generic_tuple_choice(
+        &mut self,
+        elements: &[Schema],
+    ) -> Result<Option<DataValue>, LocalBackendError> {
+        let saved = self.replay_choices.clone();
+        let mut values = Vec::with_capacity(elements.len());
+        for element in elements {
+            let Some(value) = self.replay_value_choice(element)? else {
+                self.replay_choices = saved;
+                return Ok(None);
+            };
+            values.push(value);
         }
         Ok(Some(DataValue::Tuple(values)))
     }
@@ -1642,6 +1789,12 @@ impl LocalBackend {
                 return;
             }
             self.recorded_choices.push(Choice::Integer(*value));
+        }
+    }
+
+    fn record_generic_tuple_choices(&mut self, elements: &[Schema], values: &[DataValue]) {
+        for (element, value) in elements.iter().zip(values.iter()) {
+            self.record_choice_for_value(element, value);
         }
     }
 
