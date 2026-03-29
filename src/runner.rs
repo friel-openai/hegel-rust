@@ -39,8 +39,9 @@ use hegel_core::shrink::{
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
-    shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
-    IntegerShrinkObservation, shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
+    shrink_integer_observation as shrink_core_integer_observation,
+    shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
+    ExampleSortKey, IntegerShrinkObservation, shrink_integer_dict_observation as shrink_core_integer_dict_observation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -1361,6 +1362,14 @@ enum ForcedLocalValue {
         tuple_max_values: Vec<i64>,
         unique: bool,
     },
+    IntegerDict {
+        values: Vec<(i64, i64)>,
+        min_size: usize,
+        key_min_value: i64,
+        key_max_value: i64,
+        value_min_value: i64,
+        value_max_value: i64,
+    },
     BooleanList {
         values: Vec<bool>,
         min_size: usize,
@@ -1421,6 +1430,12 @@ impl ForcedLocalValue {
                     .map(|values| {
                         DataValue::Tuple(values.into_iter().map(DataValue::Integer).collect())
                     })
+                    .collect(),
+            ),
+            Self::IntegerDict { values, .. } => DataValue::Dict(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (DataValue::Integer(key), DataValue::Integer(value)))
                     .collect(),
             ),
             Self::BooleanList { values, .. } => {
@@ -1524,6 +1539,23 @@ impl ForcedLocalValue {
                             Some(*max_value),
                         ) as u128);
                     }
+                }
+                indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::IntegerDict {
+                values,
+                min_size,
+                key_min_value,
+                key_max_value,
+                value_min_value,
+                value_max_value,
+            } => {
+                let mut indices = Vec::new();
+                for (index, (key, value)) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    indices.push(integer_choice_index(*key, Some(*key_min_value), Some(*key_max_value)) as u128);
+                    indices.push(integer_choice_index(*value, Some(*value_min_value), Some(*value_max_value)) as u128);
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1822,6 +1854,62 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     inner_element_min_value: *min_value,
                     inner_element_max_value: *max_value,
                     inner_unique: *inner_unique,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
+        (
+            Schema::Dict {
+                keys,
+                values: dict_values,
+                min_size,
+                ..
+            },
+            DataValue::Dict(values),
+        ) if matches!(keys.as_ref(), Schema::Integer { .. })
+            && matches!(dict_values.as_ref(), Schema::Integer { .. }) =>
+        {
+            let Schema::Integer {
+                min_value: key_min_value,
+                max_value: key_max_value,
+            } = keys.as_ref()
+            else {
+                unreachable!("guard already ensured integer key schema");
+            };
+            let Schema::Integer {
+                min_value: value_min_value,
+                max_value: value_max_value,
+            } = dict_values.as_ref()
+            else {
+                unreachable!("guard already ensured integer value schema");
+            };
+            let entries = values
+                .iter()
+                .map(|(key, value)| match (key, value) {
+                    (DataValue::Integer(key), DataValue::Integer(value)) => Some((*key, *value)),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_integer_dict_observation(
+                seed,
+                entries,
+                *min_size,
+                key_min_value.unwrap_or(i64::MIN),
+                key_max_value.unwrap_or(i64::MAX),
+                value_min_value.unwrap_or(i64::MIN),
+                value_max_value.unwrap_or(i64::MAX),
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::IntegerDict {
+                    values,
+                    min_size: *min_size,
+                    key_min_value: key_min_value.unwrap_or(i64::MIN),
+                    key_max_value: key_max_value.unwrap_or(i64::MAX),
+                    value_min_value: value_min_value.unwrap_or(i64::MIN),
+                    value_max_value: value_max_value.unwrap_or(i64::MAX),
                 },
                 downgraded_primary_bytes: Vec::new(),
             })
@@ -2256,6 +2344,45 @@ fn shrink_integer_tuple_list_observation<F: FnMut(TestCase)>(
                     tuple_min_values: tuple_min_values.clone(),
                     tuple_max_values: tuple_max_values.clone(),
                     unique,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_integer_dict_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<(i64, i64)>,
+    min_size: usize,
+    key_min_value: i64,
+    key_max_value: i64,
+    value_min_value: i64,
+    value_max_value: i64,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<(i64, i64)>> {
+    Some(shrink_core_integer_dict_observation(
+        current,
+        min_size,
+        key_min_value,
+        key_max_value,
+        value_min_value,
+        value_max_value,
+        |candidate: &[(i64, i64)]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::IntegerDict {
+                    values: candidate.to_vec(),
+                    min_size,
+                    key_min_value,
+                    key_max_value,
+                    value_min_value,
+                    value_max_value,
                 },
                 test_fn,
                 verbosity,
