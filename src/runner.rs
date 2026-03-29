@@ -40,7 +40,7 @@ use hegel_core::shrink::{
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
-    IntegerShrinkObservation,
+    IntegerShrinkObservation, shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -1354,6 +1354,13 @@ enum ForcedLocalValue {
         inner_element_max_value: Option<i64>,
         inner_unique: bool,
     },
+    IntegerTupleList {
+        values: Vec<Vec<i64>>,
+        min_size: usize,
+        tuple_min_values: Vec<i64>,
+        tuple_max_values: Vec<i64>,
+        unique: bool,
+    },
     BooleanList {
         values: Vec<bool>,
         min_size: usize,
@@ -1405,6 +1412,14 @@ impl ForcedLocalValue {
                     .into_iter()
                     .map(|values| {
                         DataValue::List(values.into_iter().map(DataValue::Integer).collect())
+                    })
+                    .collect(),
+            ),
+            Self::IntegerTupleList { values, .. } => DataValue::List(
+                values
+                    .into_iter()
+                    .map(|values| {
+                        DataValue::Tuple(values.into_iter().map(DataValue::Integer).collect())
                     })
                     .collect(),
             ),
@@ -1484,6 +1499,31 @@ impl ForcedLocalValue {
                         ) as u128);
                     }
                     indices.push(0);
+                }
+                indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::IntegerTupleList {
+                values,
+                min_size,
+                tuple_min_values,
+                tuple_max_values,
+                unique: _,
+            } => {
+                let mut indices = Vec::new();
+                for (index, values) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    for (value, (min_value, max_value)) in values
+                        .iter()
+                        .zip(tuple_min_values.iter().zip(tuple_max_values))
+                        .rev()
+                    {
+                        indices.push(integer_choice_index(
+                            *value,
+                            Some(*min_value),
+                            Some(*max_value),
+                        ) as u128);
+                    }
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1654,6 +1694,70 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             downgraded_primary_bytes: Vec::new(),
         }),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                max_size,
+                unique,
+            },
+            DataValue::List(values),
+        ) if matches!(
+            elements.as_ref(),
+            Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
+        ) => {
+            let Schema::Tuple { elements } = elements.as_ref() else {
+                unreachable!("guard already ensured tuple schema");
+            };
+            let tuple_min_values = elements
+                .iter()
+                .map(|element| match element {
+                    Schema::Integer { min_value, .. } => min_value.unwrap_or(i64::MIN),
+                    _ => unreachable!("guard already ensured integer tuple schema"),
+                })
+                .collect::<Vec<_>>();
+            let tuple_max_values = elements
+                .iter()
+                .map(|element| match element {
+                    Schema::Integer { max_value, .. } => max_value.unwrap_or(i64::MAX),
+                    _ => unreachable!("guard already ensured integer tuple schema"),
+                })
+                .collect::<Vec<_>>();
+            let tuples = values
+                .iter()
+                .map(|value| match value {
+                    DataValue::Tuple(values) => values
+                        .iter()
+                        .map(|value| match value {
+                            DataValue::Integer(value) => Some(*value),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>(),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_integer_tuple_list_observation(
+                seed,
+                tuples,
+                *min_size,
+                tuple_min_values.clone(),
+                tuple_max_values.clone(),
+                *unique,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::IntegerTupleList {
+                    values,
+                    min_size: *min_size,
+                    tuple_min_values,
+                    tuple_max_values,
+                    unique: *unique,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
         (
             Schema::List {
                 elements,
@@ -2116,6 +2220,42 @@ fn shrink_integer_list_list_observation<F: FnMut(TestCase)>(
                     inner_element_min_value: Some(min_value),
                     inner_element_max_value: Some(max_value),
                     inner_unique,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_integer_tuple_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<Vec<i64>>,
+    min_size: usize,
+    tuple_min_values: Vec<i64>,
+    tuple_max_values: Vec<i64>,
+    unique: bool,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Vec<i64>>> {
+    Some(shrink_core_integer_tuple_list_observation(
+        current,
+        min_size,
+        &tuple_min_values,
+        &tuple_max_values,
+        unique,
+        |candidate: &[Vec<i64>]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::IntegerTupleList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    tuple_min_values: tuple_min_values.clone(),
+                    tuple_max_values: tuple_max_values.clone(),
+                    unique,
                 },
                 test_fn,
                 verbosity,
