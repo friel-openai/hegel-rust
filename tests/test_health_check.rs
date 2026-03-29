@@ -54,9 +54,9 @@ fn test_filter_too_much_unsuppressed_parity_probe() {
     let result = std::panic::catch_unwind(|| {
         Hegel::new(|tc: TestCase| {
             let n: i32 = tc.draw(gs::integers().min_value(0).max_value(100));
-            tc.assume(n == 0);
+            tc.assume(n < 0);
         })
-        .settings(Settings::new().test_cases(100))
+        .settings(Settings::new().test_cases(1000))
         .run();
     });
 

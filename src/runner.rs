@@ -37,6 +37,7 @@ use hegel_core::shrink::{
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
+    shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
     IntegerShrinkObservation,
@@ -50,6 +51,10 @@ const SUPPORTED_PROTOCOL_VERSIONS: (f64, f64) = (0.6, 0.7);
 const HEGEL_SERVER_VERSION: &str = "0.2.3";
 const HEGEL_SERVER_COMMAND_ENV: &str = "HEGEL_SERVER_COMMAND";
 const HEGEL_SERVER_DIR: &str = ".hegel";
+#[cfg(feature = "rust-core")]
+const INVALID_THRESHOLD_BASE: u64 = 458;
+#[cfg(feature = "rust-core")]
+const INVALID_PER_VALID: u64 = 100;
 const UV_NOT_FOUND_MESSAGE: &str = "\
 You are seeing this error message because hegel-rust tried to use `uv` to install \
 hegel-core, but could not find uv on the PATH.
@@ -1025,7 +1030,10 @@ where
                 }
                 TestCaseResult::Invalid => {
                     invalid_examples += 1;
-                    if !suppress_filter_too_much && invalid_examples == 50 {
+                    if !suppress_filter_too_much
+                        && invalid_examples
+                            > INVALID_THRESHOLD_BASE + INVALID_PER_VALID * valid_examples
+                    {
                         panic!(
                             "Health check failure:\n{}",
                             local_filter_too_much_message(valid_examples, invalid_examples)
@@ -1065,7 +1073,10 @@ where
                 }
                 TestCaseResult::Invalid => {
                     invalid_examples += 1;
-                    if !suppress_filter_too_much && invalid_examples == 50 {
+                    if !suppress_filter_too_much
+                        && invalid_examples
+                            > INVALID_THRESHOLD_BASE + INVALID_PER_VALID * valid_examples
+                    {
                         panic!(
                             "Health check failure:\n{}",
                             local_filter_too_much_message(valid_examples, invalid_examples)
@@ -1082,6 +1093,9 @@ where
                         forced_value: None,
                         downgraded_primary_bytes: Vec::new(),
                     });
+                    if database.is_none() {
+                        break;
+                    }
                 }
             }
         }
@@ -1332,6 +1346,14 @@ enum ForcedLocalValue {
         element_min_value: Option<i64>,
         element_max_value: Option<i64>,
     },
+    IntegerListList {
+        values: Vec<Vec<i64>>,
+        min_size: usize,
+        inner_min_size: usize,
+        inner_element_min_value: Option<i64>,
+        inner_element_max_value: Option<i64>,
+        inner_unique: bool,
+    },
     BooleanList {
         values: Vec<bool>,
         min_size: usize,
@@ -1378,6 +1400,14 @@ impl ForcedLocalValue {
             Self::IntegerList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Integer).collect())
             }
+            Self::IntegerListList { values, .. } => DataValue::List(
+                values
+                    .into_iter()
+                    .map(|values| {
+                        DataValue::List(values.into_iter().map(DataValue::Integer).collect())
+                    })
+                    .collect(),
+            ),
             Self::BooleanList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Boolean).collect())
             }
@@ -1430,6 +1460,30 @@ impl ForcedLocalValue {
                         *element_min_value,
                         *element_max_value,
                     ) as u128);
+                }
+                indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::IntegerListList {
+                values,
+                min_size,
+                inner_min_size,
+                inner_element_min_value,
+                inner_element_max_value,
+                inner_unique: _,
+            } => {
+                let mut indices = Vec::new();
+                for (index, values) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    for (inner_index, value) in values.iter().enumerate().rev() {
+                        indices.push(if inner_index < *inner_min_size { 0 } else { 1 });
+                        indices.push(integer_choice_index(
+                            *value,
+                            *inner_element_min_value,
+                            *inner_element_max_value,
+                        ) as u128);
+                    }
+                    indices.push(0);
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1600,6 +1654,74 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             downgraded_primary_bytes: Vec::new(),
         }),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                max_size,
+                unique: _,
+            },
+            DataValue::List(values),
+        ) if matches!(
+            elements.as_ref(),
+            Schema::List {
+                elements,
+                ..
+            } if matches!(elements.as_ref(), Schema::Integer { .. })
+        ) => {
+            let Schema::List {
+                elements: inner_elements,
+                min_size: inner_min_size,
+                max_size: _,
+                unique: inner_unique,
+            } = elements.as_ref()
+            else {
+                unreachable!("guard already ensured nested list schema");
+            };
+            let Schema::Integer {
+                min_value,
+                max_value,
+            } = inner_elements.as_ref()
+            else {
+                unreachable!("guard already ensured integer element schema");
+            };
+            let integers = values
+                .iter()
+                .map(|value| match value {
+                    DataValue::List(values) => values
+                        .iter()
+                        .map(|value| match value {
+                            DataValue::Integer(value) => Some(*value),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>(),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_integer_list_list_observation(
+                seed,
+                integers,
+                *min_size,
+                *inner_min_size,
+                min_value.unwrap_or(i64::MIN),
+                max_value.unwrap_or(i64::MAX),
+                *inner_unique,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::IntegerListList {
+                    values,
+                    min_size: *min_size,
+                    inner_min_size: *inner_min_size,
+                    inner_element_min_value: *min_value,
+                    inner_element_max_value: *max_value,
+                    inner_unique: *inner_unique,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
         (
             Schema::List {
                 elements,
@@ -1955,6 +2077,45 @@ fn shrink_boolean_list_list_observation<F: FnMut(TestCase)>(
                     min_size,
                     inner_min_size,
                     inner_max_size,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_integer_list_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<Vec<i64>>,
+    min_size: usize,
+    inner_min_size: usize,
+    min_value: i64,
+    max_value: i64,
+    inner_unique: bool,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Vec<i64>>> {
+    Some(shrink_core_integer_list_list_observation(
+        current,
+        min_size,
+        inner_min_size,
+        min_value,
+        max_value,
+        inner_unique,
+        |candidate: &[Vec<i64>]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::IntegerListList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    inner_min_size,
+                    inner_element_min_value: Some(min_value),
+                    inner_element_max_value: Some(max_value),
+                    inner_unique,
                 },
                 test_fn,
                 verbosity,
