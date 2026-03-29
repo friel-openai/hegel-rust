@@ -44,7 +44,8 @@ use hegel_core::shrink::{
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
     positive_float_as_integer_ratio, preferred_float_candidates,
-    probe_integer_containment_mutation_plan, select_best_replay_plans,
+    probe_integer_containment_mutation_plan, probe_one_of_replay_choices,
+    select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -2008,15 +2009,7 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<Choice>> {
-    let Schema::OneOf { options } = schema else {
-        return None;
-    };
-    let current_index = options
-        .iter()
-        .position(|option| hegel_core::engine::value_conforms_to_schema(value, option))?;
-
-    for option in &options[..current_index] {
-        let candidate = generate_simplest_value(option).ok()?;
+    probe_one_of_replay_choices(schema, value, |candidate| {
         let backend = Rc::new(RefCell::new(LocalBackend::from_seed(seed)));
         backend.borrow_mut().force_first_value(candidate.clone());
         let is_interesting = matches!(
@@ -2031,17 +2024,15 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
             ),
             TestCaseResult::Interesting { .. }
         );
-        if is_interesting
-            && backend
+        if is_interesting {
+            backend
                 .borrow()
                 .observed_first_value()
-                .is_some_and(|(_, observed_value)| observed_value.same_observed_value(&candidate))
-        {
-            return Some(backend.borrow().recorded_choices().to_vec());
+                .map(|(_, observed_value)| (observed_value, backend.borrow().recorded_choices().to_vec()))
+        } else {
+            None
         }
-    }
-
-    None
+    })
 }
 
 #[cfg(feature = "rust-core")]
