@@ -14,13 +14,6 @@ pub enum LocalBackendError {
     InvalidRequest(String),
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct IntegerObservation {
-    pub min_value: i64,
-    pub max_value: i64,
-    pub value: i64,
-}
-
 #[derive(Debug)]
 struct CollectionState {
     min_size: usize,
@@ -85,11 +78,9 @@ pub struct LocalBackend {
     replay_choices: VecDeque<Choice>,
     recorded_choices: Vec<Choice>,
     forced_first_value: Option<DataValue>,
-    forced_first_integer: Option<i64>,
     generate_requests: usize,
     first_observed_schema: Option<Schema>,
     first_observed_value: Option<DataValue>,
-    integer_observation: Option<IntegerObservation>,
 }
 
 impl LocalBackend {
@@ -103,11 +94,9 @@ impl LocalBackend {
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
             forced_first_value: None,
-            forced_first_integer: None,
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
-            integer_observation: None,
         }
     }
 
@@ -121,11 +110,9 @@ impl LocalBackend {
             replay_choices: choices.into(),
             recorded_choices: Vec::new(),
             forced_first_value: None,
-            forced_first_integer: None,
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
-            integer_observation: None,
         }
     }
 
@@ -139,20 +126,14 @@ impl LocalBackend {
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
             forced_first_value: None,
-            forced_first_integer: None,
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
-            integer_observation: None,
         }
     }
 
     pub fn force_first_value(&mut self, value: DataValue) {
         self.forced_first_value = Some(value);
-    }
-
-    pub fn force_first_integer(&mut self, value: i64) {
-        self.forced_first_integer = Some(value);
     }
 
     pub fn observed_first_value(&self) -> Option<(Schema, DataValue)> {
@@ -162,12 +143,6 @@ impl LocalBackend {
                     .clone()
                     .zip(self.first_observed_value.clone())
             })
-            .flatten()
-    }
-
-    pub fn observed_single_integer(&self) -> Option<IntegerObservation> {
-        (self.generate_requests == 1)
-            .then_some(self.integer_observation)
             .flatten()
     }
 
@@ -188,7 +163,7 @@ impl LocalBackend {
                 let schema = schema_from_cbor(raw_schema)?;
                 self.generate_requests += 1;
                 let replayed = self.replay_value_choice(&schema)?;
-                let mut value = if self.generate_requests == 1 {
+                let value = if self.generate_requests == 1 {
                     if let Some(forced) = self.forced_first_value.take() {
                         if !value_conforms_to_schema(&forced, &schema) {
                             return Err(LocalBackendError::InvalidRequest(format!(
@@ -199,61 +174,17 @@ impl LocalBackend {
                     } else if let Some(replayed) = replayed {
                         replayed
                     } else {
-                        match &schema {
-                            Schema::Integer {
-                                min_value,
-                                max_value,
-                            } => {
-                                let min_value = min_value.unwrap_or(i64::MIN);
-                                let max_value = max_value.unwrap_or(i64::MAX);
-                                if let Some(forced) = self.forced_first_integer.take() {
-                                    if !(min_value..=max_value).contains(&forced) {
-                                        return Err(LocalBackendError::InvalidRequest(format!(
-                                            "forced integer {forced} is outside {min_value}..={max_value}"
-                                        )));
-                                    }
-                                    DataValue::Integer(forced)
-                                } else {
-                                    self.engine
-                                        .generate(&schema)
-                                        .map_err(map_engine_error_to_backend)?
-                                }
-                            }
-                            _ => self
-                                .engine
-                                .generate(&schema)
-                                .map_err(map_engine_error_to_backend)?,
-                        }
+                        self.engine
+                            .generate(&schema)
+                            .map_err(map_engine_error_to_backend)?
                     }
                 } else {
                     if let Some(replayed) = replayed {
                         replayed
                     } else {
-                        match &schema {
-                            Schema::Integer {
-                                min_value,
-                                max_value,
-                            } => {
-                                let min_value = min_value.unwrap_or(i64::MIN);
-                                let max_value = max_value.unwrap_or(i64::MAX);
-                                if let Some(forced) = self.forced_first_integer.take() {
-                                    if !(min_value..=max_value).contains(&forced) {
-                                        return Err(LocalBackendError::InvalidRequest(format!(
-                                            "forced integer {forced} is outside {min_value}..={max_value}"
-                                        )));
-                                    }
-                                    DataValue::Integer(forced)
-                                } else {
-                                    self.engine
-                                        .generate(&schema)
-                                        .map_err(map_engine_error_to_backend)?
-                                }
-                            }
-                            _ => self
-                                .engine
-                                .generate(&schema)
-                                .map_err(map_engine_error_to_backend)?,
-                        }
+                        self.engine
+                            .generate(&schema)
+                            .map_err(map_engine_error_to_backend)?
                     }
                 };
 
@@ -264,26 +195,6 @@ impl LocalBackend {
 
                 self.record_choice_for_value(&schema, &value);
 
-                value = match &schema {
-                    Schema::Integer {
-                        min_value,
-                        max_value,
-                    } => {
-                        let min_value = min_value.unwrap_or(i64::MIN);
-                        let max_value = max_value.unwrap_or(i64::MAX);
-                        if let DataValue::Integer(integer) = value {
-                            self.integer_observation = Some(IntegerObservation {
-                                min_value,
-                                max_value,
-                                value: integer,
-                            });
-                            DataValue::Integer(integer)
-                        } else {
-                            value
-                        }
-                    }
-                    _ => value,
-                };
                 Ok(data_value_to_cbor(&value))
             }
             "start_span" | "stop_span" | "mark_complete" => Ok(Value::Null),

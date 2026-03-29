@@ -22,8 +22,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 #[cfg(feature = "rust-core")]
-use crate::local_backend::IntegerObservation;
-#[cfg(feature = "rust-core")]
 use crate::local_backend::LocalBackend;
 #[cfg(feature = "rust-core")]
 use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex_cmp};
@@ -35,8 +33,11 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    integer_shrink_candidates, shrink_integer_observation as shrink_core_integer_observation,
-    ExampleSortKey, IntegerShrinkObservation,
+    float_choice_index, integer_shrink_candidates, positive_float_as_integer_ratio,
+    preferred_float_candidates,
+    shrink_integer_list_observation as shrink_core_integer_list_observation,
+    shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
+    IntegerShrinkObservation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -1369,20 +1370,11 @@ impl ForcedLocalValue {
         let (length, indices) = match self {
             Self::Float {
                 value,
-                min_value,
-                max_value,
-                allow_nan,
-                allow_infinity,
-            } => (
-                1,
-                vec![float_choice_index(
-                    *value,
-                    *min_value,
-                    *max_value,
-                    *allow_nan,
-                    *allow_infinity,
-                )],
-            ),
+                min_value: _,
+                max_value: _,
+                allow_nan: _,
+                allow_infinity: _,
+            } => (1, vec![float_choice_index(*value)]),
             Self::Integer {
                 value,
                 min_value,
@@ -1413,22 +1405,16 @@ impl ForcedLocalValue {
             Self::FloatList {
                 values,
                 min_size,
-                element_min_value,
-                element_max_value,
-                allow_nan,
-                allow_infinity,
+                element_min_value: _,
+                element_max_value: _,
+                allow_nan: _,
+                allow_infinity: _,
             } => {
                 let mut indices =
                     Vec::with_capacity(values.len().saturating_mul(2).saturating_add(1));
                 for (index, value) in values.iter().enumerate().rev() {
                     indices.push(if index < *min_size { 0 } else { 1 });
-                    indices.push(float_choice_index(
-                        *value,
-                        *element_min_value,
-                        *element_max_value,
-                        *allow_nan,
-                        *allow_infinity,
-                    ));
+                    indices.push(float_choice_index(*value));
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1821,7 +1807,7 @@ fn shrink_float_list_observation<F: FnMut(TestCase)>(
 
     let mut sorted_candidate = current.clone();
     sorted_candidate.sort_by_key(|value| {
-        float_choice_index(*value, min_value, max_value, allow_nan, allow_infinity)
+        float_choice_index(*value)
     });
     if sorted_candidate != current {
         if let Some(candidate_bytes) = local_value_candidate_bytes_if_interesting(
@@ -1884,8 +1870,7 @@ fn shrink_float_at_list_index<F: FnMut(TestCase)>(
     let mut best = current[index];
     let mut best_primary_bytes = current_primary_bytes.to_vec();
     let better_than_best = |candidate: f64, best: f64| {
-        float_choice_index(candidate, min_value, max_value, allow_nan, allow_infinity)
-            < float_choice_index(best, min_value, max_value, allow_nan, allow_infinity)
+        float_choice_index(candidate) < float_choice_index(best)
     };
     let mut consider_candidate = |candidate: f64,
                                   best: &mut f64,
@@ -2196,7 +2181,7 @@ fn shrink_binary_observation<F: FnMut(TestCase)>(
 #[cfg(feature = "rust-core")]
 fn shrink_integer_list_observation<F: FnMut(TestCase)>(
     seed: u64,
-    mut current: Vec<i64>,
+    current: Vec<i64>,
     min_size: usize,
     min_value: i64,
     max_value: i64,
@@ -2204,80 +2189,25 @@ fn shrink_integer_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<i64>> {
-    while current.len() > min_size {
-        let candidate = current[..current.len() - 1].to_vec();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::IntegerList {
-                values: candidate.clone(),
-                min_size,
-                element_min_value: Some(min_value),
-                element_max_value: Some(max_value),
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current = candidate;
-        } else {
-            break;
-        }
-    }
-
-    for index in 0..current.len() {
-        let observation = IntegerObservation {
-            min_value,
-            max_value,
-            value: current[index],
-        };
-        current[index] = shrink_integer_at_list_index(
-            seed,
-            &current,
-            min_size,
-            index,
-            observation,
-            test_fn,
-            verbosity,
-            got_interesting,
-        )?;
-    }
-
-    Some(current)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_at_list_index<F: FnMut(TestCase)>(
-    seed: u64,
-    current: &[i64],
-    min_size: usize,
-    index: usize,
-    observation: IntegerObservation,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<i64> {
-    Some(shrink_core_integer_observation(
-        IntegerShrinkObservation {
-            min_value: observation.min_value,
-            max_value: observation.max_value,
-            value: observation.value,
-        },
+    Some(shrink_core_integer_list_observation(
+        current,
+        min_size,
+        min_value,
+        max_value,
         |candidate| {
-        let mut probe = current.to_vec();
-        probe[index] = candidate;
-        local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::IntegerList {
-                values: probe,
-                min_size,
-                element_min_value: Some(observation.min_value),
-                element_max_value: Some(observation.max_value),
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        )
-        }
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::IntegerList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    element_min_value: Some(min_value),
+                    element_max_value: Some(max_value),
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
     ))
 }
 
@@ -2424,255 +2354,6 @@ fn integer_choice_index(value: i64, min_value: Option<i64>, max_value: Option<i6
             }
         }
     }
-}
-
-#[cfg(feature = "rust-core")]
-fn float_choice_index(
-    value: f64,
-    _min_value: Option<f64>,
-    _max_value: Option<f64>,
-    _allow_nan: bool,
-    _allow_infinity: bool,
-) -> u128 {
-    let sign = if value.is_sign_negative() {
-        1u128
-    } else {
-        0u128
-    };
-    (sign << 64) | hypothesis_float_to_lex(value.abs()) as u128
-}
-
-#[cfg(feature = "rust-core")]
-fn hypothesis_float_to_lex(value: f64) -> u64 {
-    if hypothesis_is_simple_float(value) {
-        return value as u64;
-    }
-    let bits = value.to_bits() & ((1u64 << 63) - 1);
-    let exponent = bits >> 52;
-    let mantissa = bits & ((1u64 << 52) - 1);
-    let unbiased_exponent = exponent as i32 - 1023;
-    let updated_mantissa = hypothesis_update_mantissa(unbiased_exponent, mantissa);
-    let encoded_exponent = hypothesis_encode_exponent(exponent);
-    (1u64 << 63) | (encoded_exponent << 52) | updated_mantissa
-}
-
-#[cfg(feature = "rust-core")]
-fn hypothesis_is_simple_float(value: f64) -> bool {
-    if !value.is_finite() || value < 0.0 {
-        return false;
-    }
-    let integer = value as u64;
-    value == integer as f64 && integer < (1u64 << 56)
-}
-
-#[cfg(feature = "rust-core")]
-fn hypothesis_encode_exponent(exponent: u64) -> u64 {
-    if exponent == 0x7ff {
-        return exponent;
-    }
-    let unbiased = exponent as i32 - 1023;
-    if unbiased >= 0 {
-        unbiased as u64
-    } else {
-        1024 + (-unbiased - 1) as u64
-    }
-}
-
-#[cfg(feature = "rust-core")]
-fn hypothesis_update_mantissa(unbiased_exponent: i32, mantissa: u64) -> u64 {
-    if unbiased_exponent <= 0 {
-        hypothesis_reverse_bits(mantissa, 52)
-    } else if unbiased_exponent <= 51 {
-        let fractional_bits = 52 - unbiased_exponent as u32;
-        let fractional_mask = (1u64 << fractional_bits) - 1;
-        let fractional_part = mantissa & fractional_mask;
-        (mantissa ^ fractional_part) | hypothesis_reverse_bits(fractional_part, fractional_bits)
-    } else {
-        mantissa
-    }
-}
-
-#[cfg(feature = "rust-core")]
-fn hypothesis_reverse_bits(value: u64, width: u32) -> u64 {
-    value.reverse_bits() >> (64 - width)
-}
-
-#[cfg(feature = "rust-core")]
-fn preferred_float_candidates(
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-) -> Vec<f64> {
-    let lower = min_value.unwrap_or(f64::NEG_INFINITY);
-    let upper = max_value.unwrap_or(f64::INFINITY);
-    let mut candidates = Vec::new();
-
-    for n in 0..=512i32 {
-        let positive = n as f64;
-        if lower <= positive && positive <= upper {
-            candidates.push(positive);
-        }
-        if n != 0 {
-            let negative = -(n as f64);
-            if lower <= negative && negative <= upper {
-                candidates.push(negative);
-            }
-        }
-    }
-
-    if allow_infinity && lower <= f64::NEG_INFINITY {
-        candidates.push(f64::NEG_INFINITY);
-    }
-    if allow_infinity && upper >= f64::INFINITY {
-        candidates.push(f64::INFINITY);
-    }
-    if allow_nan {
-        candidates.push(f64::NAN);
-    }
-
-    candidates
-}
-
-#[cfg(feature = "rust-core")]
-fn float_shrink_candidates(
-    current: f64,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-) -> Vec<f64> {
-    let mut candidates = Vec::new();
-    let magnitude = current.abs();
-
-    if magnitude.is_nan() {
-        if allow_nan {
-            candidates.push(f64::NAN);
-        }
-        return candidates;
-    }
-
-    if magnitude > 9_007_199_254_740_992.0 {
-        push_unique_float_candidate(
-            &mut candidates,
-            magnitude.trunc(),
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-        );
-    }
-
-    for power in 0..10 {
-        let scale = 2f64.powi(power);
-        let scaled = magnitude * scale;
-        push_unique_float_candidate(
-            &mut candidates,
-            scaled.floor() / scale,
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-        );
-        push_unique_float_candidate(
-            &mut candidates,
-            scaled.ceil() / scale,
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-        );
-    }
-
-    push_unique_float_candidate(
-        &mut candidates,
-        magnitude.trunc(),
-        min_value,
-        max_value,
-        allow_nan,
-        allow_infinity,
-    );
-
-    let mut sorted = candidates;
-    sorted.sort_by_key(|value| {
-        float_choice_index(*value, min_value, max_value, allow_nan, allow_infinity)
-    });
-    sorted.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    sorted
-}
-
-#[cfg(feature = "rust-core")]
-fn positive_float_as_integer_ratio(value: f64) -> Option<(u64, u64)> {
-    if !value.is_finite() || value < 0.0 {
-        return None;
-    }
-    if value == 0.0 {
-        return Some((0, 1));
-    }
-
-    let bits = value.to_bits();
-    let exponent = ((bits >> 52) & 0x7ff) as i32;
-    let mantissa = bits & ((1u64 << 52) - 1);
-
-    if exponent == 0 {
-        return None;
-    }
-
-    let significand = (1u64 << 52) | mantissa;
-    let unbiased = exponent - 1023 - 52;
-    if unbiased >= 0 {
-        Some((significand.checked_shl(unbiased as u32)?, 1))
-    } else {
-        Some((significand, 1u64.checked_shl((-unbiased) as u32)?))
-    }
-}
-
-#[cfg(feature = "rust-core")]
-fn push_unique_float_candidate(
-    candidates: &mut Vec<f64>,
-    candidate: f64,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-) {
-    if !float_candidate_permitted(candidate, min_value, max_value, allow_nan, allow_infinity) {
-        return;
-    }
-    if candidates
-        .iter()
-        .any(|existing| existing.to_bits() == candidate.to_bits())
-    {
-        return;
-    }
-    candidates.push(candidate);
-}
-
-#[cfg(feature = "rust-core")]
-fn float_candidate_permitted(
-    candidate: f64,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-) -> bool {
-    if candidate.is_nan() {
-        return allow_nan;
-    }
-    if !allow_infinity && candidate.is_infinite() {
-        return false;
-    }
-    if let Some(min_value) = min_value {
-        if candidate < min_value {
-            return false;
-        }
-    }
-    if let Some(max_value) = max_value {
-        if candidate > max_value {
-            return false;
-        }
-    }
-    true
 }
 
 #[cfg(feature = "rust-core")]
