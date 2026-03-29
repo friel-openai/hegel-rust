@@ -462,6 +462,30 @@ impl LocalBackend {
                 }
             }
             (
+                Schema::Dict { keys, values, min_size, max_size },
+                first_choice,
+            ) if matches!(keys.as_ref(), Schema::Integer { .. })
+                && matches!(values.as_ref(), Schema::String { .. }) =>
+            {
+                self.replay_choices.push_front(first_choice);
+                match self.replay_integer_string_dict_choice(keys, values, *min_size, *max_size)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
+            (
+                Schema::Dict { keys, values, min_size, max_size },
+                first_choice,
+            ) if matches!(keys.as_ref(), Schema::Boolean { .. })
+                && matches!(values.as_ref(), Schema::Boolean { .. }) =>
+            {
+                self.replay_choices.push_front(first_choice);
+                match self.replay_boolean_dict_choice(*min_size, *max_size)? {
+                    Some(value) => value,
+                    None => return Ok(None),
+                }
+            }
+            (
                 Schema::List {
                     elements,
                     min_size,
@@ -630,6 +654,32 @@ impl LocalBackend {
                 && matches!(dict_values.as_ref(), Schema::Integer { .. }) =>
             {
                 self.record_integer_dict_choices(keys, dict_values, *min_size, *max_size, values);
+            }
+            (
+                Schema::Dict {
+                    keys,
+                    values: dict_values,
+                    min_size,
+                    max_size,
+                },
+                DataValue::Dict(values),
+            ) if matches!(keys.as_ref(), Schema::Integer { .. })
+                && matches!(dict_values.as_ref(), Schema::String { .. }) =>
+            {
+                self.record_integer_string_dict_choices(keys, dict_values, *min_size, *max_size, values);
+            }
+            (
+                Schema::Dict {
+                    keys,
+                    values: dict_values,
+                    min_size,
+                    max_size,
+                },
+                DataValue::Dict(values),
+            ) if matches!(keys.as_ref(), Schema::Boolean { .. })
+                && matches!(dict_values.as_ref(), Schema::Boolean { .. }) =>
+            {
+                self.record_boolean_dict_choices(*min_size, *max_size, values);
             }
             (
                 Schema::List {
@@ -1430,6 +1480,135 @@ impl LocalBackend {
         Ok(Some(DataValue::Dict(entries)))
     }
 
+    fn replay_integer_string_dict_choice(
+        &mut self,
+        keys: &Schema,
+        values: &Schema,
+        min_size: usize,
+        max_size: Option<usize>,
+    ) -> Result<Option<DataValue>, LocalBackendError> {
+        let saved = self.replay_choices.clone();
+        let mut entries = Vec::new();
+
+        loop {
+            let count = entries.len();
+            let should_continue = if count < min_size {
+                true
+            } else if max_size.is_some_and(|max_size| count >= max_size) {
+                false
+            } else {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(should_continue) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                should_continue
+            };
+
+            if !should_continue {
+                break;
+            }
+
+            let Some(key_choice) = self.replay_choices.pop_front() else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed integer string dict ended before key".to_owned(),
+                ));
+            };
+            let Choice::Integer(key) = key_choice else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed integer string dict contained a non-integer key".to_owned(),
+                ));
+            };
+            let key = self.replay_integer_element(keys, key)?;
+            if entries.iter().any(|(existing, _)| existing == &key) {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed integer string dict contained a duplicate key".to_owned(),
+                ));
+            }
+
+            let Some(value_choice) = self.replay_choices.pop_front() else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed integer string dict ended before value".to_owned(),
+                ));
+            };
+            let Choice::String(value) = value_choice else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed integer string dict contained a non-string value".to_owned(),
+                ));
+            };
+            let value = self.replay_string_element(values, &value)?;
+            entries.push((key, value));
+        }
+
+        Ok(Some(DataValue::Dict(entries)))
+    }
+
+    fn replay_boolean_dict_choice(
+        &mut self,
+        min_size: usize,
+        max_size: Option<usize>,
+    ) -> Result<Option<DataValue>, LocalBackendError> {
+        let saved = self.replay_choices.clone();
+        let mut entries = Vec::new();
+
+        loop {
+            let count = entries.len();
+            let should_continue = if count < min_size {
+                true
+            } else if max_size.is_some_and(|max_size| count >= max_size) {
+                false
+            } else {
+                let Some(choice) = self.replay_choices.pop_front() else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                let Choice::Boolean(should_continue) = choice else {
+                    self.replay_choices = saved;
+                    return Ok(None);
+                };
+                should_continue
+            };
+
+            if !should_continue {
+                break;
+            }
+
+            let Some(key_choice) = self.replay_choices.pop_front() else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean dict ended before key".to_owned(),
+                ));
+            };
+            let Choice::Boolean(key) = key_choice else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean dict contained a non-boolean key".to_owned(),
+                ));
+            };
+            let key = DataValue::Boolean(key);
+            if entries.iter().any(|(existing, _)| existing == &key) {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean dict contained a duplicate key".to_owned(),
+                ));
+            }
+
+            let Some(value_choice) = self.replay_choices.pop_front() else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean dict ended before value".to_owned(),
+                ));
+            };
+            let Choice::Boolean(value) = value_choice else {
+                return Err(LocalBackendError::InvalidRequest(
+                    "replayed boolean dict contained a non-boolean value".to_owned(),
+                ));
+            };
+            entries.push((key, DataValue::Boolean(value)));
+        }
+
+        Ok(Some(DataValue::Dict(entries)))
+    }
+
     fn record_integer_tuple_choices(&mut self, elements: &[Schema], values: &[DataValue]) {
         for (element, value) in elements.iter().zip(values.iter()) {
             let DataValue::Integer(value) = value else {
@@ -1496,6 +1675,69 @@ impl LocalBackend {
             }
             self.recorded_choices.push(Choice::Integer(*key));
             self.recorded_choices.push(Choice::Integer(*value));
+        }
+        if max_size.is_none_or(|max_size| values.len() < max_size) {
+            self.recorded_choices.push(Choice::Boolean(false));
+        }
+    }
+
+    fn record_integer_string_dict_choices(
+        &mut self,
+        keys: &Schema,
+        values_schema: &Schema,
+        min_size: usize,
+        max_size: Option<usize>,
+        values: &[(DataValue, DataValue)],
+    ) {
+        if values.len() < min_size || max_size.is_some_and(|max_size| values.len() > max_size) {
+            return;
+        }
+
+        for (index, (key, value)) in values.iter().enumerate() {
+            if index >= min_size {
+                self.recorded_choices.push(Choice::Boolean(true));
+            }
+            let DataValue::Integer(key) = key else {
+                return;
+            };
+            let DataValue::String(value) = value else {
+                return;
+            };
+            if self.replay_integer_element(keys, *key).is_err()
+                || self.replay_string_element(values_schema, value).is_err()
+            {
+                return;
+            }
+            self.recorded_choices.push(Choice::Integer(*key));
+            self.recorded_choices.push(Choice::String(value.clone()));
+        }
+        if max_size.is_none_or(|max_size| values.len() < max_size) {
+            self.recorded_choices.push(Choice::Boolean(false));
+        }
+    }
+
+    fn record_boolean_dict_choices(
+        &mut self,
+        min_size: usize,
+        max_size: Option<usize>,
+        values: &[(DataValue, DataValue)],
+    ) {
+        if values.len() < min_size || max_size.is_some_and(|max_size| values.len() > max_size) {
+            return;
+        }
+
+        for (index, (key, value)) in values.iter().enumerate() {
+            if index >= min_size {
+                self.recorded_choices.push(Choice::Boolean(true));
+            }
+            let DataValue::Boolean(key) = key else {
+                return;
+            };
+            let DataValue::Boolean(value) = value else {
+                return;
+            };
+            self.recorded_choices.push(Choice::Boolean(*key));
+            self.recorded_choices.push(Choice::Boolean(*value));
         }
         if max_size.is_none_or(|max_size| values.len() < max_size) {
             self.recorded_choices.push(Choice::Boolean(false));

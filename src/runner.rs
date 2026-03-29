@@ -36,7 +36,9 @@ use hegel_core::shrink::{
     float_choice_index, preferred_float_candidates,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
+    shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
+    shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation,
@@ -1370,6 +1372,17 @@ enum ForcedLocalValue {
         value_min_value: i64,
         value_max_value: i64,
     },
+    IntegerStringDict {
+        values: Vec<(i64, String)>,
+        min_size: usize,
+        key_min_value: i64,
+        key_max_value: i64,
+        value_min_size: usize,
+    },
+    BooleanDict {
+        values: Vec<(bool, bool)>,
+        min_size: usize,
+    },
     BooleanList {
         values: Vec<bool>,
         min_size: usize,
@@ -1436,6 +1449,18 @@ impl ForcedLocalValue {
                 values
                     .into_iter()
                     .map(|(key, value)| (DataValue::Integer(key), DataValue::Integer(value)))
+                    .collect(),
+            ),
+            Self::IntegerStringDict { values, .. } => DataValue::Dict(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (DataValue::Integer(key), DataValue::String(value)))
+                    .collect(),
+            ),
+            Self::BooleanDict { values, .. } => DataValue::Dict(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (DataValue::Boolean(key), DataValue::Boolean(value)))
                     .collect(),
             ),
             Self::BooleanList { values, .. } => {
@@ -1556,6 +1581,35 @@ impl ForcedLocalValue {
                     indices.push(if index < *min_size { 0 } else { 1 });
                     indices.push(integer_choice_index(*key, Some(*key_min_value), Some(*key_max_value)) as u128);
                     indices.push(integer_choice_index(*value, Some(*value_min_value), Some(*value_max_value)) as u128);
+                }
+                indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::IntegerStringDict {
+                values,
+                min_size,
+                key_min_value,
+                key_max_value,
+                value_min_size,
+            } => {
+                let mut indices = Vec::new();
+                for (index, (key, value)) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    indices.push(
+                        integer_choice_index(*key, Some(*key_min_value), Some(*key_max_value))
+                            as u128,
+                    );
+                    indices.extend(string_sort_key(value, *value_min_size, None).1.into_iter());
+                }
+                indices.push(0);
+                (indices.len(), indices)
+            }
+            Self::BooleanDict { values, min_size } => {
+                let mut indices = Vec::new();
+                for (index, (key, value)) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    indices.push(u128::from(*key));
+                    indices.push(u128::from(*value));
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1910,6 +1964,96 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     key_max_value: key_max_value.unwrap_or(i64::MAX),
                     value_min_value: value_min_value.unwrap_or(i64::MIN),
                     value_max_value: value_max_value.unwrap_or(i64::MAX),
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
+        (
+            Schema::Dict {
+                keys,
+                values: dict_values,
+                min_size,
+                ..
+            },
+            DataValue::Dict(values),
+        ) if matches!(keys.as_ref(), Schema::Integer { .. })
+            && matches!(dict_values.as_ref(), Schema::String { .. }) =>
+        {
+            let Schema::Integer {
+                min_value: key_min_value,
+                max_value: key_max_value,
+            } = keys.as_ref()
+            else {
+                unreachable!("guard already ensured integer key schema");
+            };
+            let Schema::String {
+                min_size: value_min_size,
+                ..
+            } = dict_values.as_ref()
+            else {
+                unreachable!("guard already ensured string value schema");
+            };
+            let entries = values
+                .iter()
+                .map(|(key, value)| match (key, value) {
+                    (DataValue::Integer(key), DataValue::String(value)) => {
+                        Some((*key, value.clone()))
+                    }
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_integer_string_dict_observation(
+                seed,
+                entries,
+                *min_size,
+                key_min_value.unwrap_or(i64::MIN),
+                key_max_value.unwrap_or(i64::MAX),
+                *value_min_size,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::IntegerStringDict {
+                    values,
+                    min_size: *min_size,
+                    key_min_value: key_min_value.unwrap_or(i64::MIN),
+                    key_max_value: key_max_value.unwrap_or(i64::MAX),
+                    value_min_size: *value_min_size,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
+        (
+            Schema::Dict {
+                keys,
+                values: dict_values,
+                min_size,
+                ..
+            },
+            DataValue::Dict(values),
+        ) if matches!(keys.as_ref(), Schema::Boolean { .. })
+            && matches!(dict_values.as_ref(), Schema::Boolean { .. }) =>
+        {
+            let entries = values
+                .iter()
+                .map(|(key, value)| match (key, value) {
+                    (DataValue::Boolean(key), DataValue::Boolean(value)) => Some((*key, *value)),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_boolean_dict_observation(
+                seed,
+                entries,
+                *min_size,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::BooleanDict {
+                    values,
+                    min_size: *min_size,
                 },
                 downgraded_primary_bytes: Vec::new(),
             })
@@ -2383,6 +2527,69 @@ fn shrink_integer_dict_observation<F: FnMut(TestCase)>(
                     key_max_value,
                     value_min_value,
                     value_max_value,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_integer_string_dict_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<(i64, String)>,
+    min_size: usize,
+    key_min_value: i64,
+    key_max_value: i64,
+    value_min_size: usize,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<(i64, String)>> {
+    Some(shrink_core_integer_string_dict_observation(
+        current,
+        min_size,
+        key_min_value,
+        key_max_value,
+        value_min_size,
+        |candidate: &[(i64, String)]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::IntegerStringDict {
+                    values: candidate.to_vec(),
+                    min_size,
+                    key_min_value,
+                    key_max_value,
+                    value_min_size,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_boolean_dict_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<(bool, bool)>,
+    min_size: usize,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<(bool, bool)>> {
+    Some(shrink_core_boolean_dict_observation(
+        current,
+        min_size,
+        |candidate: &[(bool, bool)]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::BooleanDict {
+                    values: candidate.to_vec(),
+                    min_size,
                 },
                 test_fn,
                 verbosity,
