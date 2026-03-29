@@ -43,7 +43,8 @@ use hegel_core::shrink::{
     ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
-    positive_float_as_integer_ratio, preferred_float_candidates, select_best_replay_plans,
+    positive_float_as_integer_ratio, preferred_float_candidates,
+    probe_integer_containment_mutation_plan, select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -1103,37 +1104,37 @@ where
                     if replay_plans.is_empty() {
                         let observed_values = backend.borrow().observed_values().to_vec();
                         let recorded_choices = backend.borrow().recorded_choices().to_vec();
-                        for forced_prefix_values in
-                            local_integer_containment_mutations(&observed_values)
-                        {
-                            let mutation_backend = Rc::new(RefCell::new(
-                                LocalBackend::from_choices(recorded_choices.clone()),
-                            ));
-                            mutation_backend
-                                .borrow_mut()
-                                .force_values(forced_prefix_values.clone());
-                            let mutation_result = run_test_case(
-                                TestBackend::Local {
-                                    backend: Rc::clone(&mutation_backend),
-                                },
-                                &mut test_fn,
-                                false,
-                                verbosity,
-                                &got_interesting,
-                            );
-                            if let TestCaseResult::Interesting { origin, .. } = mutation_result {
-                                let recorded_choices =
-                                    mutation_backend.borrow().recorded_choices().to_vec();
-                                replay_plans.push(LocalReplayPlan {
-                                    origin,
-                                    seed: Some(seed),
-                                    replay_choices: Some(recorded_choices),
-                                    forced_prefix_values,
-                                    forced_value: None,
-                                    downgraded_primary_bytes: Vec::new(),
-                                });
-                                break;
-                            }
+                        if let Some(plan) = probe_integer_containment_mutation_plan(
+                            seed,
+                            &observed_values,
+                            |forced_prefix_values| {
+                                let mutation_backend = Rc::new(RefCell::new(
+                                    LocalBackend::from_choices(recorded_choices.clone()),
+                                ));
+                                mutation_backend
+                                    .borrow_mut()
+                                    .force_values(forced_prefix_values);
+                                let mutation_result = run_test_case(
+                                    TestBackend::Local {
+                                        backend: Rc::clone(&mutation_backend),
+                                    },
+                                    &mut test_fn,
+                                    false,
+                                    verbosity,
+                                    &got_interesting,
+                                );
+                                if let TestCaseResult::Interesting { origin, .. } = mutation_result
+                                {
+                                    Some((
+                                        origin,
+                                        mutation_backend.borrow().recorded_choices().to_vec(),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            },
+                        ) {
+                            replay_plans.push(plan);
                         }
                     }
                 }
@@ -1473,61 +1474,6 @@ fn local_backend_from_replay_plan(plan: &LocalReplayPlan) -> LocalBackend {
             LocalBackend::from_seed_and_choices(seed, choices)
         }
     }
-}
-
-#[cfg(feature = "rust-core")]
-fn local_integer_containment_mutations(
-    observed_values: &[(Schema, DataValue)],
-) -> Vec<Vec<DataValue>> {
-    let [
-        (
-            Schema::List {
-                elements,
-                unique: false,
-                ..
-            },
-            DataValue::List(values),
-        ),
-        (
-            Schema::Integer {
-                min_value: scalar_min_value,
-                max_value: scalar_max_value,
-            },
-            DataValue::Integer(_),
-        ),
-    ] = observed_values
-    else {
-        return Vec::new();
-    };
-    let Schema::Integer {
-        min_value,
-        max_value,
-    } = elements.as_ref()
-    else {
-        return Vec::new();
-    };
-    if min_value != scalar_min_value || max_value != scalar_max_value {
-        return Vec::new();
-    }
-
-    let mut mutations = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for value in values {
-        let DataValue::Integer(value) = value else {
-            return Vec::new();
-        };
-        if !seen.insert(*value) {
-            continue;
-        }
-        mutations.push(vec![
-            DataValue::List(values.clone()),
-            DataValue::Integer(*value),
-        ]);
-        if mutations.len() >= 4 {
-            break;
-        }
-    }
-    mutations
 }
 
 #[cfg(feature = "rust-core")]
