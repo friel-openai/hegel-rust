@@ -48,22 +48,13 @@ use hegel_core::shrink::{
     float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
-    shrink_binary_forced_value, shrink_boolean_dict_forced_value,
-    shrink_boolean_list_forced_value, shrink_boolean_list_list_forced_value,
-    shrink_boolean_forced_value,
+    shrink_non_float_fallback_observation,
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_forced_value,
-    shrink_integer_dict_forced_value,
-    shrink_integer_list_forced_value,
-    shrink_integer_list_list_forced_value,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
-    shrink_integer_forced_value,
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
-    shrink_integer_string_dict_forced_value, shrink_string_forced_value,
-    shrink_string_list_forced_value,
-    shrink_integer_tuple_list_forced_value,
 };
 #[cfg(feature = "rust-core")]
 use std::io::Write;
@@ -1325,7 +1316,6 @@ where
                                     plan.seed.unwrap_or(0),
                                     &schema,
                                     &value,
-                                    plan.replay_choices.as_deref(),
                                     &choices_to_bytes(&recorded_choices),
                                     &mut test_fn,
                                     verbosity,
@@ -2154,13 +2144,13 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
     seed: u64,
     schema: &Schema,
     value: &DataValue,
-    replay_choices: Option<&[Choice]>,
     initial_primary_bytes: &[u8],
     test_fn: &mut F,
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<LocalShrinkResult> {
-    match fallback_shrink_observation(schema, value)? {
+    let observation = fallback_shrink_observation(schema, value)?;
+    match observation {
         FallbackShrinkObservation::Float {
                 min_value,
                 max_value,
@@ -2188,222 +2178,6 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             ),
             downgraded_primary_bytes: Vec::new(),
         }),
-        FallbackShrinkObservation::Boolean(value) => Some(LocalShrinkResult {
-            forced_value: shrink_boolean_forced_value(value, |candidate| {
-                    local_boolean_candidate_is_interesting(
-                        seed,
-                        replay_choices,
-                        candidate,
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                }),
-            downgraded_primary_bytes: Vec::new(),
-        }),
-        FallbackShrinkObservation::Integer {
-                min_value,
-                max_value,
-                value,
-        } => Some(LocalShrinkResult {
-            forced_value: shrink_integer_forced_value(
-                value,
-                min_value,
-                max_value,
-                |candidate| {
-                    local_integer_candidate_is_interesting(
-                        seed,
-                        replay_choices,
-                        candidate,
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-            downgraded_primary_bytes: Vec::new(),
-        }),
-        FallbackShrinkObservation::IntegerTupleList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_integer_tuple_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.tuple_min_values.clone(),
-                    observation.tuple_max_values.clone(),
-                    observation.unique,
-                    |candidate| {
-                        local_value_candidate_is_interesting(
-                            seed,
-                            &ForcedLocalValue::IntegerTupleList {
-                                values: candidate.to_vec(),
-                                min_size: observation.min_size,
-                                tuple_min_values: observation.tuple_min_values.clone(),
-                                tuple_max_values: observation.tuple_max_values.clone(),
-                                unique: observation.unique,
-                            },
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::IntegerListList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_integer_list_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.inner_min_size,
-                    observation.inner_element_min_value,
-                    observation.inner_element_max_value,
-                    observation.inner_unique,
-                    |candidate| {
-                        local_value_candidate_is_interesting(
-                            seed,
-                            &ForcedLocalValue::IntegerListList {
-                                values: candidate.to_vec(),
-                                min_size: observation.min_size,
-                                inner_min_size: observation.inner_min_size,
-                                inner_element_min_value: observation.inner_element_min_value,
-                                inner_element_max_value: observation.inner_element_max_value,
-                                inner_unique: observation.inner_unique,
-                            },
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::IntegerDict(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_integer_dict_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.key_min_value,
-                    observation.key_max_value,
-                    observation.value_min_value,
-                    observation.value_max_value,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::IntegerDict {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                            key_min_value: observation.key_min_value,
-                            key_max_value: observation.key_max_value,
-                            value_min_value: observation.value_min_value,
-                            value_max_value: observation.value_max_value,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::IntegerStringDict(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_integer_string_dict_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.key_min_value,
-                    observation.key_max_value,
-                    observation.value_min_size,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::IntegerStringDict {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                            key_min_value: observation.key_min_value,
-                            key_max_value: observation.key_max_value,
-                            value_min_size: observation.value_min_size,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::BooleanDict(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_boolean_dict_forced_value(
-                    observation.values,
-                    observation.min_size,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::BooleanDict {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::BooleanListList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_boolean_list_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.inner_min_size,
-                    observation.inner_max_size,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::BooleanListList {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                            inner_min_size: observation.inner_min_size,
-                            inner_max_size: observation.inner_max_size,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::BooleanList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_boolean_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.max_size,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::BooleanList {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                            max_size: observation.max_size,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
         FallbackShrinkObservation::FloatList(observation) => {
             let (forced_value, downgraded_primary_bytes) = shrink_float_list_forced_value(
                 observation.values,
@@ -2436,103 +2210,15 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes,
             })
         }
-        FallbackShrinkObservation::IntegerList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_integer_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.element_min_value,
-                    observation.element_max_value,
-                    observation.unique,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::IntegerList {
-                            values: candidate.to_vec(),
-                            min_size: observation.min_size,
-                            element_min_value: observation.element_min_value,
-                            element_max_value: observation.element_max_value,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::Binary(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_binary_forced_value(
-                    observation.value,
-                    observation.min_size,
-                    observation.max_size,
-                    |candidate| {
-                        local_value_candidate_is_interesting(
-                            seed,
-                            &ForcedLocalValue::Binary {
-                                value: candidate.to_vec(),
-                                min_size: observation.min_size,
-                                max_size: observation.max_size,
-                            },
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::String(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_string_forced_value(
-                    observation.value,
-                    observation.min_size,
-                    observation.max_size,
-                    |candidate| {
-                        local_value_candidate_is_interesting(
-                            seed,
-                            &ForcedLocalValue::String {
-                                value: candidate.to_owned(),
-                                min_size: observation.min_size,
-                                max_size: observation.max_size,
-                            },
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
-        FallbackShrinkObservation::StringList(observation) => {
-            Some(LocalShrinkResult {
-                forced_value: shrink_string_list_forced_value(
-                    observation.values,
-                    observation.min_size,
-                    observation.element_min_size,
-                    observation.element_max_size,
-                    |candidate| {
-                        local_value_candidate_is_interesting(
-                            seed,
-                            &ForcedLocalValue::StringList {
-                                values: candidate.to_vec(),
-                                min_size: observation.min_size,
-                                element_min_size: observation.element_min_size,
-                                element_max_size: observation.element_max_size,
-                            },
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
-                downgraded_primary_bytes: Vec::new(),
-            })
-        }
+        observation => shrink_non_float_fallback_observation(observation, |forced_value| {
+            local_value_candidate_is_interesting(
+                seed,
+                forced_value,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        }),
     }
 }
 
@@ -2626,50 +2312,6 @@ fn local_float_candidate_is_valid(
     }
     (min_value.unwrap_or(f64::NEG_INFINITY)..=max_value.unwrap_or(f64::INFINITY))
         .contains(&candidate)
-}
-
-#[cfg(feature = "rust-core")]
-fn local_integer_candidate_is_interesting<F: FnMut(TestCase)>(
-    seed: u64,
-    replay_choices: Option<&[Choice]>,
-    candidate: i64,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> bool {
-    local_value_candidate_bytes_with_replay_if_interesting(
-        seed,
-        replay_choices,
-        &ForcedLocalValue::Integer {
-            value: candidate.into(),
-            min_value: None,
-            max_value: None,
-        },
-        test_fn,
-        verbosity,
-        got_interesting,
-    )
-    .is_some()
-}
-
-#[cfg(feature = "rust-core")]
-fn local_boolean_candidate_is_interesting<F: FnMut(TestCase)>(
-    seed: u64,
-    replay_choices: Option<&[Choice]>,
-    candidate: bool,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> bool {
-    local_value_candidate_bytes_with_replay_if_interesting(
-        seed,
-        replay_choices,
-        &ForcedLocalValue::Boolean { value: candidate },
-        test_fn,
-        verbosity,
-        got_interesting,
-    )
-    .is_some()
 }
 
 #[cfg(feature = "rust-core")]
@@ -3002,7 +2644,6 @@ mod tests {
                             seed,
                             &schema,
                             &value,
-                            None,
                             &choices_to_bytes(backend.borrow().recorded_choices()),
                             &mut test_fn,
                             verbosity,
