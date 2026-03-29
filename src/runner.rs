@@ -1496,12 +1496,25 @@ fn local_integer_containment_mutations(
             },
             DataValue::List(values),
         ),
-        (Schema::Integer { .. }, DataValue::Integer(_)),
+        (
+            Schema::Integer {
+                min_value: scalar_min_value,
+                max_value: scalar_max_value,
+            },
+            DataValue::Integer(_),
+        ),
     ] = observed_values
     else {
         return Vec::new();
     };
-    if !matches!(elements.as_ref(), Schema::Integer { .. }) {
+    let Schema::Integer {
+        min_value,
+        max_value,
+    } = elements.as_ref()
+    else {
+        return Vec::new();
+    };
+    if min_value != scalar_min_value || max_value != scalar_max_value {
         return Vec::new();
     }
 
