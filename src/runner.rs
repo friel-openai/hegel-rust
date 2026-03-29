@@ -1247,6 +1247,18 @@ where
                         plan.forced_prefix_values = forced_prefix_values;
                         plan.forced_value = None;
                     } else if let Some(forced_prefix_values) =
+                        shrink_local_flatmap_integer_list_list_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &spans,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
                         shrink_local_flatmap_integer_list_observation(
                             plan.seed.unwrap_or(0),
                             &observed_values,
@@ -1938,6 +1950,114 @@ fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
     Some(vec![
         DataValue::Integer(shrunk.len() as i64),
         DataValue::List(shrunk.into_iter().map(DataValue::Boolean).collect()),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    spans: &[LocalSpanRecord],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (
+            Schema::Integer {
+                min_value: _,
+                max_value: _,
+            },
+            DataValue::Integer(width),
+        ),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    let Schema::List {
+        elements: inner_elements,
+        min_size: inner_min_size,
+        max_size: inner_max_size,
+        unique: false,
+    } = elements.as_ref()
+    else {
+        return None;
+    };
+    let Schema::Integer {
+        min_value: element_min_value,
+        max_value: element_max_value,
+    } = inner_elements.as_ref()
+    else {
+        return None;
+    };
+    if !has_flatmap_list_span(spans) {
+        return None;
+    }
+    let width = usize::try_from(*width).ok()?;
+    if *inner_min_size != width || *inner_max_size != Some(width) {
+        return None;
+    }
+
+    let current = values
+        .iter()
+        .map(|value| match value {
+            DataValue::List(values) => values
+                .iter()
+                .map(|value| match value {
+                    DataValue::Integer(value) => Some(*value),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let shrunk = shrink_core_integer_list_list_observation(
+        current,
+        *min_size,
+        width,
+        element_min_value.unwrap_or(i64::MIN),
+        element_max_value.unwrap_or(i64::MAX),
+        false,
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(width as i64),
+                    DataValue::List(
+                        candidate
+                            .iter()
+                            .map(|values| {
+                                DataValue::List(
+                                    values.iter().copied().map(DataValue::Integer).collect(),
+                                )
+                            })
+                            .collect(),
+                    ),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+
+    Some(vec![
+        DataValue::Integer(width as i64),
+        DataValue::List(
+            shrunk
+                .into_iter()
+                .map(|values| DataValue::List(values.into_iter().map(DataValue::Integer).collect()))
+                .collect(),
+        ),
     ])
 }
 
