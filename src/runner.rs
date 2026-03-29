@@ -949,6 +949,7 @@ where
         let verbosity = self.settings.verbosity;
         let got_interesting = Arc::new(AtomicBool::new(false));
         let mut replay_plans = Vec::new();
+        let mut exact_replay_origins = std::collections::HashSet::new();
         let database = match &self.settings.database {
             Database::Path(path) => Some(LocalExampleDatabase::new(path)),
             Database::Unset | Database::Disabled => None,
@@ -985,6 +986,7 @@ where
                 match tc_result {
                     TestCaseResult::Interesting { origin, .. } => {
                         valid_examples += 1;
+                        exact_replay_origins.insert(origin.clone());
                         replay_plans.push(LocalReplayPlan {
                             origin,
                             seed: None,
@@ -1032,6 +1034,7 @@ where
                 TestCaseResult::Interesting { origin, .. } => {
                     valid_examples += 1;
                     let recorded_choices = simplest_backend.borrow().recorded_choices().to_vec();
+                    exact_replay_origins.insert(origin.clone());
                     replay_plans.push(LocalReplayPlan {
                         origin,
                         seed: None,
@@ -1071,7 +1074,9 @@ where
                 TestCaseResult::Interesting { origin, .. } => {
                     valid_examples += 1;
                     let recorded_choices = backend.borrow().recorded_choices().to_vec();
-                    let shrink_result = if self.settings.derandomize {
+                    let shrink_result = if self.settings.derandomize
+                        && !exact_replay_origins.contains(&origin)
+                    {
                         backend
                             .borrow()
                             .observed_first_value()
