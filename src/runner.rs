@@ -39,9 +39,9 @@ use hegel_core::schema::{DataValue, Schema};
 use hegel_core::shrink::{
     ExampleSortKey, ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
     ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
-    flatmap_boolean_list_observation, flatmap_integer_list_list_observation,
-    flatmap_integer_list_observation, has_child_span_with_label, preferred_float_candidates,
-    select_best_replay_plans,
+    flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
+    flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
+    positive_float_as_integer_ratio, preferred_float_candidates, select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -971,6 +971,7 @@ where
         let got_interesting = Arc::new(AtomicBool::new(false));
         let mut replay_plans = Vec::new();
         let mut exact_replay_origins = std::collections::HashSet::new();
+        let mut expected_first_schema: Option<Schema> = None;
         let database = match &self.settings.database {
             Database::Path(path) => Some(LocalExampleDatabase::new(path)),
             Database::Unset | Database::Disabled => None,
@@ -1003,6 +1004,10 @@ where
                     false,
                     verbosity,
                     &got_interesting,
+                );
+                local_assert_deterministic_schema(
+                    &mut expected_first_schema,
+                    backend.borrow().observed_values(),
                 );
                 match tc_result {
                     TestCaseResult::Interesting { origin, .. } => {
@@ -1039,6 +1044,10 @@ where
                 false,
                 verbosity,
                 &got_interesting,
+            );
+            local_assert_deterministic_schema(
+                &mut expected_first_schema,
+                simplest_backend.borrow().observed_values(),
             );
             match simplest_result {
                 TestCaseResult::Valid => {
@@ -1083,6 +1092,10 @@ where
                 false,
                 verbosity,
                 &got_interesting,
+            );
+            local_assert_deterministic_schema(
+                &mut expected_first_schema,
+                backend.borrow().observed_values(),
             );
             match tc_result {
                 TestCaseResult::Valid => {
@@ -1463,6 +1476,27 @@ Applying this much filtering makes input generation slow, since Hypothesis must 
 \n\n\
 If you expect this many inputs to be filtered out during generation, you can disable this health check with @settings(suppress_health_check=[HealthCheck.filter_too_much]). See https://hypothesis.readthedocs.io/en/latest/reference/api.html#hypothesis.HealthCheck for details."
     )
+}
+
+#[cfg(feature = "rust-core")]
+fn local_assert_deterministic_schema(
+    expected_first_schema: &mut Option<Schema>,
+    observed_values: &[(Schema, DataValue)],
+) {
+    let Some((schema, _)) = observed_values.first() else {
+        return;
+    };
+    match expected_first_schema {
+        Some(expected) if expected != schema => {
+            panic!(
+                "Flaky test detected: Your data generation is non-deterministic: a different call to draw() happened than expected, or your test errored before data generation that previously completed successfully had finished. This usually means your test depends on external state such as global variables, system time, or external random number generators."
+            );
+        }
+        Some(_) => {}
+        None => {
+            *expected_first_schema = Some(schema.clone());
+        }
+    }
 }
 
 #[cfg(feature = "rust-core")]
@@ -2863,22 +2897,81 @@ fn shrink_float_observation<F: FnMut(TestCase)>(
     if current.is_nan() {
         return Some(f64::NAN);
     }
-    for candidate in preferred_float_candidates(min_value, max_value, allow_nan, allow_infinity) {
-        if local_float_candidate_is_interesting(
-            seed,
-            candidate,
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            return Some(candidate);
+    let mut best = current;
+    loop {
+        let mut candidates =
+            preferred_float_candidates(min_value, max_value, allow_nan, allow_infinity);
+
+        if best.is_finite() {
+            candidates.push(best / 2.0);
+        }
+        if let Some((numerator, denominator)) = positive_float_as_integer_ratio(best.abs()) {
+            let integral = numerator / denominator;
+            let remainder = numerator % denominator;
+            let sign = if best.is_sign_negative() { -1.0 } else { 1.0 };
+            for candidate_integral in integer_shrink_candidates(integral) {
+                candidates.push(
+                    sign * (candidate_integral as f64 * denominator as f64 + remainder as f64)
+                        / denominator as f64,
+                );
+            }
+        }
+
+        candidates.sort_by_key(|candidate| float_choice_index(*candidate));
+        candidates.dedup_by(|left, right| left.to_bits() == right.to_bits());
+
+        let mut improved = false;
+        for candidate in candidates {
+            if float_choice_index(candidate) >= float_choice_index(best)
+                || !local_float_candidate_is_valid(
+                    candidate,
+                    min_value,
+                    max_value,
+                    allow_nan,
+                    allow_infinity,
+                )
+            {
+                continue;
+            }
+            if local_float_candidate_is_interesting(
+                seed,
+                candidate,
+                min_value,
+                max_value,
+                allow_nan,
+                allow_infinity,
+                test_fn,
+                verbosity,
+                got_interesting,
+            ) {
+                best = candidate;
+                improved = true;
+                break;
+            }
+        }
+        if !improved {
+            break;
         }
     }
-    Some(current)
+    Some(best)
+}
+
+#[cfg(feature = "rust-core")]
+fn local_float_candidate_is_valid(
+    candidate: f64,
+    min_value: Option<f64>,
+    max_value: Option<f64>,
+    allow_nan: bool,
+    allow_infinity: bool,
+) -> bool {
+    if candidate.is_nan() {
+        return allow_nan;
+    }
+    if candidate.is_infinite() {
+        return allow_infinity;
+    }
+    (min_value.unwrap_or(f64::NEG_INFINITY)..=max_value.unwrap_or(f64::INFINITY))
+        .contains(&candidate)
 }
 
 #[cfg(feature = "rust-core")]

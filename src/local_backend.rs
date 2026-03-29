@@ -626,33 +626,10 @@ impl LocalBackend {
                 }
                 DataValue::Integer(value)
             }
-            (
-                Schema::Float {
-                    min_value,
-                    max_value,
-                    allow_nan,
-                    allow_infinity,
-                    ..
-                },
-                Choice::Float(value),
-            ) => {
-                if value.is_nan() && !allow_nan {
-                    return Err(LocalBackendError::InvalidRequest(
-                        "replayed float is NaN but schema disallows NaN".to_owned(),
-                    ));
-                }
-                if value.is_infinite() && !allow_infinity {
-                    return Err(LocalBackendError::InvalidRequest(
-                        "replayed float is infinite but schema disallows infinity".to_owned(),
-                    ));
-                }
-                if value.is_finite()
-                    && !(min_value.unwrap_or(f64::NEG_INFINITY)
-                        ..=max_value.unwrap_or(f64::INFINITY))
-                        .contains(&value)
-                {
+            (schema @ Schema::Float { .. }, Choice::Float(value)) => {
+                if !value_conforms_to_schema(&DataValue::Float(value), schema) {
                     return Err(LocalBackendError::InvalidRequest(format!(
-                        "replayed float {value} is outside schema bounds"
+                        "replayed float {value} does not conform to schema"
                     )));
                 }
                 DataValue::Float(value)
@@ -1374,35 +1351,14 @@ impl LocalBackend {
         schema: &Schema,
         value: f64,
     ) -> Result<DataValue, LocalBackendError> {
-        let Schema::Float {
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-            ..
-        } = schema
-        else {
+        if !matches!(schema, Schema::Float { .. }) {
             return Err(LocalBackendError::InvalidRequest(
                 "replayed float element used a non-float schema".to_owned(),
             ));
-        };
-        if value.is_nan() {
-            if !allow_nan {
-                return Err(LocalBackendError::InvalidRequest(
-                    "replayed float element is NaN but schema disallows NaN".to_owned(),
-                ));
-            }
-        } else if value.is_infinite() {
-            if !allow_infinity {
-                return Err(LocalBackendError::InvalidRequest(
-                    "replayed float element is infinite but schema disallows infinity".to_owned(),
-                ));
-            }
-        } else if !(min_value.unwrap_or(f64::NEG_INFINITY)..=max_value.unwrap_or(f64::INFINITY))
-            .contains(&value)
-        {
+        }
+        if !value_conforms_to_schema(&DataValue::Float(value), schema) {
             return Err(LocalBackendError::InvalidRequest(format!(
-                "replayed float element {value} is outside schema bounds"
+                "replayed float element {value} does not conform to schema"
             )));
         }
         Ok(DataValue::Float(value))
