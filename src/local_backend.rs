@@ -77,10 +77,11 @@ pub struct LocalBackend {
     pools: Vec<PoolState>,
     replay_choices: VecDeque<Choice>,
     recorded_choices: Vec<Choice>,
-    forced_first_value: Option<DataValue>,
+    forced_values: VecDeque<DataValue>,
     generate_requests: usize,
     first_observed_schema: Option<Schema>,
     first_observed_value: Option<DataValue>,
+    observed_values: Vec<(Schema, DataValue)>,
 }
 
 impl LocalBackend {
@@ -93,10 +94,11 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
-            forced_first_value: None,
+            forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
+            observed_values: Vec::new(),
         }
     }
 
@@ -109,10 +111,11 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: choices.into(),
             recorded_choices: Vec::new(),
-            forced_first_value: None,
+            forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
+            observed_values: Vec::new(),
         }
     }
 
@@ -125,15 +128,20 @@ impl LocalBackend {
             pools: Vec::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
-            forced_first_value: None,
+            forced_values: VecDeque::new(),
             generate_requests: 0,
             first_observed_schema: None,
             first_observed_value: None,
+            observed_values: Vec::new(),
         }
     }
 
     pub fn force_first_value(&mut self, value: DataValue) {
-        self.forced_first_value = Some(value);
+        self.force_values(vec![value]);
+    }
+
+    pub fn force_values(&mut self, values: Vec<DataValue>) {
+        self.forced_values = values.into();
     }
 
     pub fn observed_first_value(&self) -> Option<(Schema, DataValue)> {
@@ -144,6 +152,10 @@ impl LocalBackend {
                     .zip(self.first_observed_value.clone())
             })
             .flatten()
+    }
+
+    pub fn observed_values(&self) -> &[(Schema, DataValue)] {
+        &self.observed_values
     }
 
     pub fn recorded_choices(&self) -> &[Choice] {
@@ -163,35 +175,26 @@ impl LocalBackend {
                 let schema = schema_from_cbor(raw_schema)?;
                 self.generate_requests += 1;
                 let replayed = self.replay_value_choice(&schema)?;
-                let value = if self.generate_requests == 1 {
-                    if let Some(forced) = self.forced_first_value.take() {
-                        if !value_conforms_to_schema(&forced, &schema) {
-                            return Err(LocalBackendError::InvalidRequest(format!(
-                                "forced value {forced:?} does not conform to schema {schema:?}"
-                            )));
-                        }
-                        forced
-                    } else if let Some(replayed) = replayed {
-                        replayed
-                    } else {
-                        self.engine
-                            .generate(&schema)
-                            .map_err(map_engine_error_to_backend)?
+                let value = if let Some(forced) = self.forced_values.pop_front() {
+                    if !value_conforms_to_schema(&forced, &schema) {
+                        return Err(LocalBackendError::InvalidRequest(format!(
+                            "forced value {forced:?} does not conform to schema {schema:?}"
+                        )));
                     }
+                    forced
+                } else if let Some(replayed) = replayed {
+                    replayed
                 } else {
-                    if let Some(replayed) = replayed {
-                        replayed
-                    } else {
-                        self.engine
-                            .generate(&schema)
-                            .map_err(map_engine_error_to_backend)?
-                    }
+                    self.engine
+                        .generate(&schema)
+                        .map_err(map_engine_error_to_backend)?
                 };
 
                 if self.generate_requests == 1 {
                     self.first_observed_schema = Some(schema.clone());
                     self.first_observed_value = Some(value.clone());
                 }
+                self.observed_values.push((schema.clone(), value.clone()));
 
                 self.record_choice_for_value(&schema, &value);
 
@@ -450,7 +453,12 @@ impl LocalBackend {
             (Schema::String { .. }, Choice::String(value)) => DataValue::String(value),
             (Schema::Binary { .. }, Choice::Bytes(value)) => DataValue::Binary(value),
             (
-                Schema::Dict { keys, values, min_size, max_size },
+                Schema::Dict {
+                    keys,
+                    values,
+                    min_size,
+                    max_size,
+                },
                 first_choice,
             ) if matches!(keys.as_ref(), Schema::Integer { .. })
                 && matches!(values.as_ref(), Schema::Integer { .. }) =>
@@ -462,7 +470,12 @@ impl LocalBackend {
                 }
             }
             (
-                Schema::Dict { keys, values, min_size, max_size },
+                Schema::Dict {
+                    keys,
+                    values,
+                    min_size,
+                    max_size,
+                },
                 first_choice,
             ) if matches!(keys.as_ref(), Schema::Integer { .. })
                 && matches!(values.as_ref(), Schema::String { .. }) =>
@@ -474,7 +487,12 @@ impl LocalBackend {
                 }
             }
             (
-                Schema::Dict { keys, values, min_size, max_size },
+                Schema::Dict {
+                    keys,
+                    values,
+                    min_size,
+                    max_size,
+                },
                 first_choice,
             ) if matches!(keys.as_ref(), Schema::Boolean { .. })
                 && matches!(values.as_ref(), Schema::Boolean { .. }) =>
@@ -496,7 +514,8 @@ impl LocalBackend {
             ) if matches!(
                 elements.as_ref(),
                 Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
-            ) => {
+            ) =>
+            {
                 self.replay_choices.push_front(first_choice);
                 match self.replay_integer_tuple_list_choice(elements, *min_size, *max_size)? {
                     Some(value) => value,
@@ -517,7 +536,8 @@ impl LocalBackend {
                     elements,
                     ..
                 } if matches!(elements.as_ref(), Schema::Integer { .. })
-            ) => {
+            ) =>
+            {
                 self.replay_choices.push_front(first_choice);
                 match self.replay_integer_list_list_choice(elements, *min_size, *max_size)? {
                     Some(value) => value,
@@ -538,7 +558,8 @@ impl LocalBackend {
                     elements,
                     ..
                 } if matches!(elements.as_ref(), Schema::Boolean { .. })
-            ) => {
+            ) =>
+            {
                 self.replay_choices.push_front(first_choice);
                 match self.replay_boolean_list_list_choice(elements, *min_size, *max_size)? {
                     Some(value) => value,
@@ -666,7 +687,13 @@ impl LocalBackend {
             ) if matches!(keys.as_ref(), Schema::Integer { .. })
                 && matches!(dict_values.as_ref(), Schema::String { .. }) =>
             {
-                self.record_integer_string_dict_choices(keys, dict_values, *min_size, *max_size, values);
+                self.record_integer_string_dict_choices(
+                    keys,
+                    dict_values,
+                    *min_size,
+                    *max_size,
+                    values,
+                );
             }
             (
                 Schema::Dict {
@@ -692,7 +719,8 @@ impl LocalBackend {
             ) if matches!(
                 elements.as_ref(),
                 Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
-            ) => {
+            ) =>
+            {
                 self.record_integer_tuple_list_choices(elements, *min_size, *max_size, values);
             }
             (
@@ -709,7 +737,8 @@ impl LocalBackend {
                     elements,
                     ..
                 } if matches!(elements.as_ref(), Schema::Integer { .. })
-            ) => {
+            ) =>
+            {
                 self.record_integer_list_list_choices(elements, *min_size, *max_size, values);
             }
             (
@@ -726,7 +755,8 @@ impl LocalBackend {
                     elements,
                     ..
                 } if matches!(elements.as_ref(), Schema::Boolean { .. })
-            ) => {
+            ) =>
+            {
                 self.record_boolean_list_list_choices(elements, *min_size, *max_size, values);
             }
             (
@@ -898,11 +928,8 @@ impl LocalBackend {
                 break;
             }
 
-            let Some(value) = self.replay_boolean_list_choice(
-                inner_elements,
-                *inner_min_size,
-                *inner_max_size,
-            )?
+            let Some(value) =
+                self.replay_boolean_list_choice(inner_elements, *inner_min_size, *inner_max_size)?
             else {
                 self.replay_choices = saved;
                 return Ok(None);
@@ -1002,11 +1029,8 @@ impl LocalBackend {
                 break;
             }
 
-            let Some(value) = self.replay_integer_list_choice(
-                inner_elements,
-                *inner_min_size,
-                *inner_max_size,
-            )?
+            let Some(value) =
+                self.replay_integer_list_choice(inner_elements, *inner_min_size, *inner_max_size)?
             else {
                 self.replay_choices = saved;
                 return Ok(None);

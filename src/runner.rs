@@ -33,17 +33,17 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    float_choice_index, preferred_float_candidates,
+    ExampleSortKey, IntegerShrinkObservation, float_choice_index, preferred_float_candidates,
+    shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
-    shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
-    shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
+    shrink_integer_dict_observation as shrink_core_integer_dict_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation,
+    shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
     shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
-    ExampleSortKey, IntegerShrinkObservation, shrink_integer_dict_observation as shrink_core_integer_dict_observation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -1000,6 +1000,7 @@ where
                             origin,
                             seed: None,
                             replay_choices: Some(replay_choices),
+                            forced_prefix_values: Vec::new(),
                             forced_value: None,
                             downgraded_primary_bytes: Vec::new(),
                         });
@@ -1051,6 +1052,7 @@ where
                         origin,
                         seed: None,
                         replay_choices: Some(recorded_choices),
+                        forced_prefix_values: Vec::new(),
                         forced_value: None,
                         downgraded_primary_bytes: Vec::new(),
                     });
@@ -1073,6 +1075,42 @@ where
             match tc_result {
                 TestCaseResult::Valid => {
                     valid_examples += 1;
+                    if replay_plans.is_empty() {
+                        let observed_values = backend.borrow().observed_values().to_vec();
+                        let recorded_choices = backend.borrow().recorded_choices().to_vec();
+                        for forced_prefix_values in
+                            local_integer_containment_mutations(&observed_values)
+                        {
+                            let mutation_backend = Rc::new(RefCell::new(
+                                LocalBackend::from_choices(recorded_choices.clone()),
+                            ));
+                            mutation_backend
+                                .borrow_mut()
+                                .force_values(forced_prefix_values.clone());
+                            let mutation_result = run_test_case(
+                                TestBackend::Local {
+                                    backend: Rc::clone(&mutation_backend),
+                                },
+                                &mut test_fn,
+                                false,
+                                verbosity,
+                                &got_interesting,
+                            );
+                            if let TestCaseResult::Interesting { origin, .. } = mutation_result {
+                                let recorded_choices =
+                                    mutation_backend.borrow().recorded_choices().to_vec();
+                                replay_plans.push(LocalReplayPlan {
+                                    origin,
+                                    seed: Some(seed),
+                                    replay_choices: Some(recorded_choices),
+                                    forced_prefix_values,
+                                    forced_value: None,
+                                    downgraded_primary_bytes: Vec::new(),
+                                });
+                                break;
+                            }
+                        }
+                    }
                 }
                 TestCaseResult::Invalid => {
                     invalid_examples += 1;
@@ -1093,6 +1131,7 @@ where
                         origin,
                         seed: Some(seed),
                         replay_choices: Some(recorded_choices),
+                        forced_prefix_values: Vec::new(),
                         forced_value: None,
                         downgraded_primary_bytes: Vec::new(),
                     });
@@ -1107,10 +1146,13 @@ where
         let final_plans = if self.settings.derandomize {
             let mut best_by_origin: std::collections::HashMap<String, LocalReplayPlan> =
                 std::collections::HashMap::new();
-            for plan in replay_plans.iter().filter(|plan| plan.sort_key().is_some()).cloned() {
+            for plan in replay_plans
+                .iter()
+                .filter(|plan| plan.sort_key().is_some())
+                .cloned()
+            {
                 match best_by_origin.get(&plan.origin) {
-                    Some(existing)
-                        if existing.sort_key().as_ref() <= plan.sort_key().as_ref() => {}
+                    Some(existing) if existing.sort_key().as_ref() <= plan.sort_key().as_ref() => {}
                     _ => {
                         best_by_origin.insert(plan.origin.clone(), plan);
                     }
@@ -1135,6 +1177,11 @@ where
             let mut plan = plan;
             if self.settings.derandomize && plan.forced_value.is_none() {
                 let backend = Rc::new(RefCell::new(plan.backend()));
+                if !plan.forced_prefix_values.is_empty() {
+                    backend
+                        .borrow_mut()
+                        .force_values(plan.forced_prefix_values.clone());
+                }
                 let tc_result = run_test_case(
                     TestBackend::Local {
                         backend: Rc::clone(&backend),
@@ -1146,20 +1193,35 @@ where
                 );
                 if matches!(tc_result, TestCaseResult::Interesting { .. }) {
                     let recorded_choices = backend.borrow().recorded_choices().to_vec();
-                    if let Some(result) = backend
-                        .borrow()
-                        .observed_first_value()
-                        .and_then(|(schema, value)| {
-                            shrink_local_observation(
-                                plan.seed.unwrap_or(0),
-                                &schema,
-                                &value,
-                                &choices_to_bytes(&recorded_choices),
-                                &mut test_fn,
-                                verbosity,
-                                &got_interesting,
-                            )
-                        })
+                    let observed_values = backend.borrow().observed_values().to_vec();
+                    if let Some((forced_value, forced_second_value)) =
+                        shrink_local_integer_containment_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_value = Some(forced_value);
+                        if plan.forced_prefix_values.len() >= 2 {
+                            plan.forced_prefix_values[1] = forced_second_value;
+                        }
+                    } else if let Some(result) =
+                        backend
+                            .borrow()
+                            .observed_first_value()
+                            .and_then(|(schema, value)| {
+                                shrink_local_observation(
+                                    plan.seed.unwrap_or(0),
+                                    &schema,
+                                    &value,
+                                    &choices_to_bytes(&recorded_choices),
+                                    &mut test_fn,
+                                    verbosity,
+                                    &got_interesting,
+                                )
+                            })
                     {
                         plan.forced_value = Some(result.forced_value);
                         plan.downgraded_primary_bytes = result.downgraded_primary_bytes;
@@ -1168,9 +1230,13 @@ where
             }
             let backend = Rc::new(RefCell::new(plan.backend()));
             if let Some(value) = &plan.forced_value {
+                let mut forced_values = vec![value.clone().into_data_value()];
+                forced_values.extend(plan.forced_prefix_values.iter().skip(1).cloned());
+                backend.borrow_mut().force_values(forced_values);
+            } else if !plan.forced_prefix_values.is_empty() {
                 backend
                     .borrow_mut()
-                    .force_first_value(value.clone().into_data_value());
+                    .force_values(plan.forced_prefix_values.clone());
             }
             let tc_result = run_test_case(
                 TestBackend::Local {
@@ -1219,9 +1285,10 @@ where
                         recorded_bytes.into_iter().map(u128::from).collect(),
                     )
                 };
-                if best_final_display_sort_key.as_ref().is_none_or(|existing| {
-                    &display_sort_key < existing
-                }) {
+                if best_final_display_sort_key
+                    .as_ref()
+                    .is_none_or(|existing| &display_sort_key < existing)
+                {
                     best_final_display_sort_key = Some(display_sort_key);
                     best_final_display_plan = Some(plan.clone());
                 }
@@ -1232,9 +1299,13 @@ where
         if let Some(best_plan) = best_final_display_plan {
             let backend = Rc::new(RefCell::new(best_plan.backend()));
             if let Some(value) = &best_plan.forced_value {
+                let mut forced_values = vec![value.clone().into_data_value()];
+                forced_values.extend(best_plan.forced_prefix_values.iter().skip(1).cloned());
+                backend.borrow_mut().force_values(forced_values);
+            } else if !best_plan.forced_prefix_values.is_empty() {
                 backend
                     .borrow_mut()
-                    .force_first_value(value.clone().into_data_value());
+                    .force_values(best_plan.forced_prefix_values.clone());
             }
             let tc_result = run_test_case(
                 TestBackend::Local {
@@ -1265,9 +1336,7 @@ where
 
         if got_interesting.load(Ordering::SeqCst) {
             let msg = match &final_result {
-                Some(TestCaseResult::Interesting { panic_message, .. }) => {
-                    panic_message.as_str()
-                }
+                Some(TestCaseResult::Interesting { panic_message, .. }) => panic_message.as_str(),
                 _ => "unknown",
             };
             panic!("Property test failed: {}", msg);
@@ -1302,6 +1371,7 @@ struct LocalReplayPlan {
     origin: String,
     seed: Option<u64>,
     replay_choices: Option<Vec<Choice>>,
+    forced_prefix_values: Vec<DataValue>,
     forced_value: Option<ForcedLocalValue>,
     downgraded_primary_bytes: Vec<Vec<u8>>,
 }
@@ -1326,6 +1396,167 @@ impl LocalReplayPlan {
             (None, None) => unreachable!("local replay plan requires a seed or exact choices"),
         }
     }
+}
+
+#[cfg(feature = "rust-core")]
+fn local_integer_containment_mutations(
+    observed_values: &[(Schema, DataValue)],
+) -> Vec<Vec<DataValue>> {
+    let [
+        (
+            Schema::List {
+                elements,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+        (Schema::Integer { .. }, DataValue::Integer(_)),
+    ] = observed_values
+    else {
+        return Vec::new();
+    };
+    if !matches!(elements.as_ref(), Schema::Integer { .. }) {
+        return Vec::new();
+    }
+
+    let mut mutations = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for value in values {
+        let DataValue::Integer(value) = value else {
+            return Vec::new();
+        };
+        if !seen.insert(*value) {
+            continue;
+        }
+        mutations.push(vec![
+            DataValue::List(values.clone()),
+            DataValue::Integer(*value),
+        ]);
+        if mutations.len() >= 4 {
+            break;
+        }
+    }
+    mutations
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<(ForcedLocalValue, DataValue)> {
+    let [
+        (
+            Schema::List {
+                elements,
+                min_size,
+                unique,
+                ..
+            },
+            DataValue::List(values),
+        ),
+        (
+            Schema::Integer {
+                min_value: scalar_min_value,
+                max_value: scalar_max_value,
+            },
+            DataValue::Integer(scalar),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    let Schema::Integer {
+        min_value,
+        max_value,
+    } = elements.as_ref()
+    else {
+        return None;
+    };
+    let mut current_scalar = *scalar;
+    let mut current_values = values
+        .iter()
+        .map(|value| match value {
+            DataValue::Integer(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    current_scalar = shrink_core_integer_observation(
+        IntegerShrinkObservation {
+            min_value: scalar_min_value.unwrap_or(i64::MIN),
+            max_value: scalar_max_value.unwrap_or(i64::MAX),
+            value: current_scalar,
+        },
+        |candidate| {
+            let candidate_values = current_values
+                .iter()
+                .map(|value| {
+                    if *value == current_scalar {
+                        candidate
+                    } else {
+                        *value
+                    }
+                })
+                .collect::<Vec<_>>();
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::List(
+                        candidate_values
+                            .into_iter()
+                            .map(DataValue::Integer)
+                            .collect(),
+                    ),
+                    DataValue::Integer(candidate),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+    for value in &mut current_values {
+        if *value == *scalar {
+            *value = current_scalar;
+        }
+    }
+
+    let current_values = shrink_core_integer_list_observation(
+        current_values,
+        *min_size,
+        min_value.unwrap_or(i64::MIN),
+        max_value.unwrap_or(i64::MAX),
+        *unique,
+        |candidate| {
+            candidate.contains(&current_scalar)
+                && local_forced_values_are_interesting(
+                    seed,
+                    vec![
+                        DataValue::List(
+                            candidate.iter().copied().map(DataValue::Integer).collect(),
+                        ),
+                        DataValue::Integer(current_scalar),
+                    ],
+                    test_fn,
+                    verbosity,
+                    got_interesting,
+                )
+        },
+    );
+
+    Some((
+        ForcedLocalValue::IntegerList {
+            values: current_values,
+            min_size: *min_size,
+            element_min_value: *min_value,
+            element_max_value: *max_value,
+        },
+        DataValue::Integer(current_scalar),
+    ))
 }
 
 #[cfg(feature = "rust-core")]
@@ -1469,7 +1700,9 @@ impl ForcedLocalValue {
             Self::BooleanListList { values, .. } => DataValue::List(
                 values
                     .into_iter()
-                    .map(|values| DataValue::List(values.into_iter().map(DataValue::Boolean).collect()))
+                    .map(|values| {
+                        DataValue::List(values.into_iter().map(DataValue::Boolean).collect())
+                    })
                     .collect(),
             ),
             Self::FloatList { values, .. } => {
@@ -1579,8 +1812,16 @@ impl ForcedLocalValue {
                 let mut indices = Vec::new();
                 for (index, (key, value)) in values.iter().enumerate().rev() {
                     indices.push(if index < *min_size { 0 } else { 1 });
-                    indices.push(integer_choice_index(*key, Some(*key_min_value), Some(*key_max_value)) as u128);
-                    indices.push(integer_choice_index(*value, Some(*value_min_value), Some(*value_max_value)) as u128);
+                    indices.push(integer_choice_index(
+                        *key,
+                        Some(*key_min_value),
+                        Some(*key_max_value),
+                    ) as u128);
+                    indices.push(integer_choice_index(
+                        *value,
+                        Some(*value_min_value),
+                        Some(*value_max_value),
+                    ) as u128);
                 }
                 indices.push(0);
                 (indices.len(), indices)
@@ -1595,10 +1836,11 @@ impl ForcedLocalValue {
                 let mut indices = Vec::new();
                 for (index, (key, value)) in values.iter().enumerate().rev() {
                     indices.push(if index < *min_size { 0 } else { 1 });
-                    indices.push(
-                        integer_choice_index(*key, Some(*key_min_value), Some(*key_max_value))
-                            as u128,
-                    );
+                    indices.push(integer_choice_index(
+                        *key,
+                        Some(*key_min_value),
+                        Some(*key_max_value),
+                    ) as u128);
                     indices.extend(string_sort_key(value, *value_min_size, None).1.into_iter());
                 }
                 indices.push(0);
@@ -1619,7 +1861,8 @@ impl ForcedLocalValue {
                 min_size,
                 max_size,
             } => {
-                let mut indices = Vec::with_capacity(values.len().saturating_mul(2).saturating_add(1));
+                let mut indices =
+                    Vec::with_capacity(values.len().saturating_mul(2).saturating_add(1));
                 for (index, value) in values.iter().enumerate().rev() {
                     indices.push(if index < *min_size { 0 } else { 1 });
                     indices.push(u128::from(*value));
@@ -1791,7 +2034,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
         ) if matches!(
             elements.as_ref(),
             Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
-        ) => {
+        ) =>
+        {
             let Schema::Tuple { elements } = elements.as_ref() else {
                 unreachable!("guard already ensured tuple schema");
             };
@@ -1858,7 +2102,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 elements,
                 ..
             } if matches!(elements.as_ref(), Schema::Integer { .. })
-        ) => {
+        ) =>
+        {
             let Schema::List {
                 elements: inner_elements,
                 min_size: inner_min_size,
@@ -2072,7 +2317,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 elements,
                 ..
             } if matches!(elements.as_ref(), Schema::Boolean { .. })
-        ) => {
+        ) =>
+        {
             let Schema::List {
                 min_size: inner_min_size,
                 max_size: inner_max_size,
@@ -2964,6 +3210,30 @@ fn local_value_candidate_is_interesting<F: FnMut(TestCase)>(
 }
 
 #[cfg(feature = "rust-core")]
+fn local_forced_values_are_interesting<F: FnMut(TestCase)>(
+    seed: u64,
+    forced_values: Vec<DataValue>,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> bool {
+    let backend = Rc::new(RefCell::new(LocalBackend::from_seed(seed)));
+    backend.borrow_mut().force_values(forced_values);
+    matches!(
+        run_test_case(
+            TestBackend::Local {
+                backend: Rc::clone(&backend),
+            },
+            test_fn,
+            false,
+            verbosity,
+            got_interesting,
+        ),
+        TestCaseResult::Interesting { .. }
+    )
+}
+
+#[cfg(feature = "rust-core")]
 fn local_value_candidate_bytes_if_interesting<F: FnMut(TestCase)>(
     seed: u64,
     candidate: &ForcedLocalValue,
@@ -3269,6 +3539,7 @@ mod tests {
                     origin: "Panic at tests::bounded_positive".to_owned(),
                     seed: Some(seed),
                     replay_choices: None,
+                    forced_prefix_values: Vec::new(),
                     forced_value,
                     downgraded_primary_bytes: Vec::new(),
                 });
@@ -3427,7 +3698,11 @@ mod tests {
 
         assert_eq!(result.0.len(), 2);
         assert_eq!(result.0.iter().filter(|&&value| value == 0.0).count(), 1);
-        assert!(result.0.contains(&1.0), "expected shrink result to contain 1.0, got {:?}", result.0);
+        assert!(
+            result.0.contains(&1.0),
+            "expected shrink result to contain 1.0, got {:?}",
+            result.0
+        );
     }
 
     #[test]
@@ -3507,5 +3782,4 @@ mod tests {
             ])
         );
     }
-
 }
