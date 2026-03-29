@@ -225,15 +225,30 @@ impl LocalBackend {
                         Schema::Integer {
                             min_value: Some(min_value),
                             max_value: Some(max_value),
-                        } if self.seed % 400 == 399 => DataValue::Integer(*min_value),
+                        } if self.generate_requests == 1
+                            && self.span_stack.is_empty()
+                            && self.seed % 400 == 399 =>
+                        {
+                            DataValue::Integer(*min_value)
+                        }
                         Schema::Integer {
                             min_value: Some(_),
                             max_value: Some(max_value),
-                        } if self.seed % 200 == 199 => DataValue::Integer(*max_value),
+                        } if self.generate_requests == 1
+                            && self.span_stack.is_empty()
+                            && self.seed % 200 == 199 =>
+                        {
+                            DataValue::Integer(*max_value)
+                        }
                         Schema::Integer {
                             min_value: Some(0),
                             max_value: None,
-                        } if self.seed % 200 == 199 => DataValue::UnsignedInteger(u128::MAX),
+                        } if self.generate_requests == 1
+                            && self.span_stack.is_empty()
+                            && self.seed % 200 == 199 =>
+                        {
+                            DataValue::UnsignedInteger(u128::MAX)
+                        }
                         _ => self
                             .engine
                             .generate(&schema)
