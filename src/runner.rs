@@ -1201,10 +1201,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_value = Some(forced_value);
-                        if plan.forced_prefix_values.len() >= 2 {
-                            plan.forced_prefix_values[1] = forced_second_value;
-                        }
+                        plan.set_forced_value_and_second_prefix(forced_value, forced_second_value);
                     } else if let Some(forced_prefix_values) = shrink_local_integer_pair_observation(
                         plan.seed.unwrap_or(0),
                         &observed_values,
@@ -1212,8 +1209,7 @@ where
                         verbosity,
                         &got_interesting,
                     ) {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_separated_integer_pair_observation(
                             plan.seed.unwrap_or(0),
@@ -1223,8 +1219,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_flatmap_boolean_list_observation(
                             plan.seed.unwrap_or(0),
@@ -1235,8 +1230,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_flatmap_integer_list_list_observation(
                             plan.seed.unwrap_or(0),
@@ -1247,8 +1241,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_flatmap_integer_list_observation(
                             plan.seed.unwrap_or(0),
@@ -1259,8 +1252,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(replay_choices) =
                         shrink_local_composite_mixed_list_observation(
                             &recorded_choices,
@@ -1270,9 +1262,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.replay_choices = Some(replay_choices);
-                        plan.forced_prefix_values = Vec::new();
-                        plan.forced_value = None;
+                        plan.set_replay_choices(replay_choices);
                     } else if let Some(replay_choices) =
                         observed_values.first().and_then(|(schema, value)| {
                             shrink_local_mixed_list_observation(
@@ -1285,9 +1275,7 @@ where
                             )
                         })
                     {
-                        plan.replay_choices = Some(replay_choices);
-                        plan.forced_prefix_values = Vec::new();
-                        plan.forced_value = None;
+                        plan.set_replay_choices(replay_choices);
                     } else if let Some(replay_choices) =
                         observed_values.first().and_then(|(schema, value)| {
                             shrink_local_one_of_observation(
@@ -1300,9 +1288,7 @@ where
                             )
                         })
                     {
-                        plan.replay_choices = Some(replay_choices);
-                        plan.forced_prefix_values = Vec::new();
-                        plan.forced_value = None;
+                        plan.set_replay_choices(replay_choices);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_integer_fill_const_list_observation(
                             plan.seed.unwrap_or(0),
@@ -1313,8 +1299,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(forced_prefix_values) =
                         shrink_local_boolean_fill_const_list_observation(
                             plan.seed.unwrap_or(0),
@@ -1324,8 +1309,7 @@ where
                             &got_interesting,
                         )
                     {
-                        plan.forced_prefix_values = forced_prefix_values;
-                        plan.forced_value = None;
+                        plan.set_forced_prefix_values(forced_prefix_values);
                     } else if let Some(result) =
                         backend
                             .borrow()
