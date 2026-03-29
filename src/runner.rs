@@ -34,7 +34,10 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 #[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
-use hegel_core::shrink::ExampleSortKey;
+use hegel_core::shrink::{
+    shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
+    IntegerShrinkObservation,
+};
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
 #[cfg(feature = "rust-core")]
@@ -1521,20 +1524,24 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 max_value,
             },
             DataValue::Integer(value),
-        ) => shrink_integer_observation(
-            seed,
-            IntegerObservation {
-                min_value: min_value.unwrap_or(i64::MIN),
-                max_value: max_value.unwrap_or(i64::MAX),
-                value: *value,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        )
-        .map(|value| LocalShrinkResult {
+        ) => Some(LocalShrinkResult {
             forced_value: ForcedLocalValue::Integer {
-                value,
+                value: shrink_core_integer_observation(
+                    IntegerShrinkObservation {
+                        min_value: min_value.unwrap_or(i64::MIN),
+                        max_value: max_value.unwrap_or(i64::MAX),
+                        value: *value,
+                    },
+                    |candidate| {
+                        local_integer_candidate_is_interesting(
+                            seed,
+                            candidate,
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 min_value: *min_value,
                 max_value: *max_value,
             },
@@ -2184,87 +2191,6 @@ fn shrink_binary_observation<F: FnMut(TestCase)>(
     }
 
     Some(current)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    observation: IntegerObservation,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<i64> {
-    let mut best = observation.value;
-
-    if observation.min_value <= 0
-        && 0 <= observation.max_value
-        && local_integer_candidate_is_interesting(seed, 0, test_fn, verbosity, got_interesting)
-    {
-        return Some(0);
-    }
-
-    if best > 0 {
-        let floor = observation.min_value.max(1);
-        if !(floor..=best).contains(&floor) {
-            return Some(best);
-        }
-        if local_integer_candidate_is_interesting(seed, floor, test_fn, verbosity, got_interesting)
-        {
-            best = floor;
-        } else {
-            let mut low = floor;
-            let mut high = best;
-            while low + 1 < high {
-                let mid = low + ((high - low) / 2);
-                if local_integer_candidate_is_interesting(
-                    seed,
-                    mid,
-                    test_fn,
-                    verbosity,
-                    got_interesting,
-                ) {
-                    high = mid;
-                } else {
-                    low = mid;
-                }
-            }
-            best = high;
-        }
-    } else if best < 0 {
-        let ceiling = observation.max_value.min(-1);
-        if !(best..=ceiling).contains(&ceiling) {
-            return Some(best);
-        }
-        if local_integer_candidate_is_interesting(
-            seed,
-            ceiling,
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            best = ceiling;
-        } else {
-            let mut low = best;
-            let mut high = ceiling;
-            while low + 1 < high {
-                let mid = high - ((high - low) / 2);
-                if local_integer_candidate_is_interesting(
-                    seed,
-                    mid,
-                    test_fn,
-                    verbosity,
-                    got_interesting,
-                ) {
-                    low = mid;
-                } else {
-                    high = mid - 1;
-                }
-            }
-            best = low;
-        }
-    }
-
-    Some(best)
 }
 
 #[cfg(feature = "rust-core")]
