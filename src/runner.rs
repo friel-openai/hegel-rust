@@ -40,7 +40,8 @@ use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
     ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
-    ReplayPlan as LocalReplayPlan, composite_mixed_list_choices,
+    ReplayPlan as LocalReplayPlan, ReplayPlanMutation as LocalShrinkResult,
+    composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
     float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
@@ -1331,8 +1332,7 @@ where
                                 )
                             })
                     {
-                        plan.forced_value = Some(result.forced_value);
-                        plan.downgraded_primary_bytes = result.downgraded_primary_bytes;
+                        result.apply_to_replay_plan(&mut plan);
                     }
                 }
             }
@@ -1459,13 +1459,6 @@ fn local_assert_deterministic_schema(
             *expected_first_schema = Some(schema.clone());
         }
     }
-}
-
-#[cfg(feature = "rust-core")]
-#[derive(Clone, Debug)]
-struct LocalShrinkResult {
-    forced_value: ForcedLocalValue,
-    downgraded_primary_bytes: Vec<Vec<u8>>,
 }
 
 #[cfg(feature = "rust-core")]
