@@ -39,13 +39,14 @@ use hegel_core::runtime::{
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    boolean_dict_observation, boolean_list_list_observation, boolean_list_observation,
+    binary_observation, boolean_dict_observation, boolean_list_list_observation,
+    boolean_list_observation, float_list_observation,
     ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
     ReplayPlan as LocalReplayPlan, ReplayPlanMutation as LocalShrinkResult,
     composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_dict_observation,
-    integer_list_list_observation, integer_shrink_candidates,
+    integer_list_list_observation, integer_list_observation, integer_shrink_candidates,
     integer_string_dict_observation, integer_tuple_list_observation, float_forced_value,
     positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
@@ -64,7 +65,7 @@ use hegel_core::shrink::{
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_forced_value, shrink_string_forced_value,
-    shrink_string_list_forced_value,
+    shrink_string_list_forced_value, string_list_observation, string_observation,
     shrink_integer_tuple_list_forced_value,
 };
 #[cfg(feature = "rust-core")]
@@ -2507,41 +2508,25 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             DataValue::List(values),
         ) if matches!(elements.as_ref(), Schema::Float { .. }) => {
-            let Schema::Float {
-                min_value,
-                max_value,
-                allow_nan,
-                allow_infinity,
-                ..
-            } = elements.as_ref()
-            else {
-                unreachable!("guard already ensured float element schema");
-            };
-            let floats = values
-                .iter()
-                .map(|value| match value {
-                    DataValue::Float(value) => Some(*value),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let observation = float_list_observation(schema, value)?;
             let (forced_value, downgraded_primary_bytes) = shrink_float_list_forced_value(
-                floats,
+                observation.values,
                 initial_primary_bytes.to_vec(),
-                *min_size,
-                *min_value,
-                *max_value,
-                *allow_nan,
-                *allow_infinity,
+                observation.min_size,
+                observation.element_min_value,
+                observation.element_max_value,
+                observation.allow_nan,
+                observation.allow_infinity,
                 |candidate| {
                     local_value_candidate_bytes_if_interesting(
                         seed,
                         &ForcedLocalValue::FloatList {
                             values: candidate.to_vec(),
-                            min_size: *min_size,
-                            element_min_value: *min_value,
-                            element_max_value: *max_value,
-                            allow_nan: *allow_nan,
-                            allow_infinity: *allow_infinity,
+                            min_size: observation.min_size,
+                            element_min_value: observation.element_min_value,
+                            element_max_value: observation.element_max_value,
+                            allow_nan: observation.allow_nan,
+                            allow_infinity: observation.allow_infinity,
                         },
                         test_fn,
                         verbosity,
@@ -2564,35 +2549,22 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             DataValue::List(values),
         ) if matches!(elements.as_ref(), Schema::Integer { .. }) => {
-            let Schema::Integer {
-                min_value,
-                max_value,
-            } = elements.as_ref()
-            else {
-                unreachable!("guard already ensured integer element schema");
-            };
-            let integers = values
-                .iter()
-                .map(|value| match value {
-                    DataValue::Integer(value) => i64::try_from(*value).ok(),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let observation = integer_list_observation(schema, value)?;
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_list_forced_value(
-                integers,
-                *min_size,
-                min_value.and_then(|value| i64::try_from(value).ok()),
-                max_value.and_then(|value| i64::try_from(value).ok()),
-                *unique,
+                    observation.values,
+                    observation.min_size,
+                    observation.element_min_value,
+                    observation.element_max_value,
+                    observation.unique,
                 |candidate| {
                     local_value_candidate_is_interesting(
                         seed,
                         &ForcedLocalValue::IntegerList {
                             values: candidate.to_vec(),
-                            min_size: *min_size,
-                            element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
-                            element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
+                            min_size: observation.min_size,
+                            element_min_value: observation.element_min_value,
+                            element_max_value: observation.element_max_value,
                         },
                         test_fn,
                         verbosity,
@@ -2603,19 +2575,20 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (Schema::Binary { min_size, max_size }, DataValue::Binary(value)) => {
+        (Schema::Binary { .. }, DataValue::Binary(value)) => {
+            let observation = binary_observation(schema, &DataValue::Binary(value.clone()))?;
             Some(LocalShrinkResult {
                 forced_value: shrink_binary_forced_value(
-                    value.clone(),
-                    *min_size,
-                    *max_size,
+                    observation.value,
+                    observation.min_size,
+                    observation.max_size,
                     |candidate| {
                         local_value_candidate_is_interesting(
                             seed,
                             &ForcedLocalValue::Binary {
                                 value: candidate.to_vec(),
-                                min_size: *min_size,
-                                max_size: *max_size,
+                                min_size: observation.min_size,
+                                max_size: observation.max_size,
                             },
                             test_fn,
                             verbosity,
@@ -2626,19 +2599,20 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 downgraded_primary_bytes: Vec::new(),
             })
         }
-        (Schema::String { min_size, max_size }, DataValue::String(value)) => {
+        (Schema::String { .. }, DataValue::String(value)) => {
+            let observation = string_observation(schema, &DataValue::String(value.clone()))?;
             Some(LocalShrinkResult {
                 forced_value: shrink_string_forced_value(
-                    value.clone(),
-                    *min_size,
-                    *max_size,
+                    observation.value,
+                    observation.min_size,
+                    observation.max_size,
                     |candidate| {
                         local_value_candidate_is_interesting(
                             seed,
                             &ForcedLocalValue::String {
                                 value: candidate.to_owned(),
-                                min_size: *min_size,
-                                max_size: *max_size,
+                                min_size: observation.min_size,
+                                max_size: observation.max_size,
                             },
                             test_fn,
                             verbosity,
@@ -2658,34 +2632,21 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             DataValue::List(values),
         ) if matches!(elements.as_ref(), Schema::String { .. }) => {
-            let Schema::String {
-                min_size: element_min_size,
-                max_size: element_max_size,
-            } = elements.as_ref()
-            else {
-                unreachable!("guard already ensured string element schema");
-            };
-            let strings = values
-                .iter()
-                .map(|value| match value {
-                    DataValue::String(value) => Some(value.clone()),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let observation = string_list_observation(schema, value)?;
             Some(LocalShrinkResult {
                 forced_value: shrink_string_list_forced_value(
-                    strings,
-                    *min_size,
-                    *element_min_size,
-                    *element_max_size,
+                    observation.values,
+                    observation.min_size,
+                    observation.element_min_size,
+                    observation.element_max_size,
                     |candidate| {
                         local_value_candidate_is_interesting(
                             seed,
                             &ForcedLocalValue::StringList {
                                 values: candidate.to_vec(),
-                                min_size: *min_size,
-                                element_min_size: *element_min_size,
-                                element_max_size: *element_max_size,
+                                min_size: observation.min_size,
+                                element_min_size: observation.element_min_size,
+                                element_max_size: observation.element_max_size,
                             },
                             test_fn,
                             verbosity,
