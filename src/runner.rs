@@ -1075,38 +1075,12 @@ where
                 TestCaseResult::Interesting { origin, .. } => {
                     valid_examples += 1;
                     let recorded_choices = backend.borrow().recorded_choices().to_vec();
-                    let shrink_result = if self.settings.derandomize
-                        && !exact_replay_origins.contains(&origin)
-                    {
-                        backend
-                            .borrow()
-                            .observed_first_value()
-                            .and_then(|(schema, value)| {
-                                shrink_local_observation(
-                                    seed,
-                                    &schema,
-                                    &value,
-                                    &choices_to_bytes(&recorded_choices),
-                                    &mut test_fn,
-                                    verbosity,
-                                    &got_interesting,
-                                )
-                            })
-                    } else {
-                        None
-                    };
-                    let (forced_value, downgraded_primary_bytes) = match shrink_result {
-                        Some(result) => {
-                            (Some(result.forced_value), result.downgraded_primary_bytes)
-                        }
-                        None => (None, Vec::new()),
-                    };
                     replay_plans.push(LocalReplayPlan {
                         origin,
                         seed: Some(seed),
-                        replay_choices: None,
-                        forced_value,
-                        downgraded_primary_bytes,
+                        replay_choices: Some(recorded_choices),
+                        forced_value: None,
+                        downgraded_primary_bytes: Vec::new(),
                     });
                 }
             }
@@ -1114,31 +1088,21 @@ where
 
         let mut final_result: Option<TestCaseResult> = None;
         let final_plans = if self.settings.derandomize {
-            let mut best_supported_by_origin: std::collections::HashMap<String, LocalReplayPlan> =
+            let mut best_by_origin: std::collections::HashMap<String, LocalReplayPlan> =
                 std::collections::HashMap::new();
-            for plan in replay_plans
-                .iter()
-                .filter(|plan| plan.sort_key().is_some())
-                .cloned()
-            {
-                match best_supported_by_origin.get(&plan.origin) {
+            for plan in replay_plans.iter().filter(|plan| plan.sort_key().is_some()).cloned() {
+                match best_by_origin.get(&plan.origin) {
                     Some(existing)
                         if existing.sort_key().as_ref() <= plan.sort_key().as_ref() => {}
                     _ => {
-                        best_supported_by_origin.insert(plan.origin.clone(), plan);
+                        best_by_origin.insert(plan.origin.clone(), plan);
                     }
                 }
             }
-            let mut exact_replay_plans: Vec<_> = replay_plans
-                .iter()
-                .filter(|plan| plan.replay_choices.is_some())
-                .cloned()
-                .collect();
-            exact_replay_plans.extend(best_supported_by_origin.into_values());
-            if exact_replay_plans.is_empty() {
+            if best_by_origin.is_empty() {
                 replay_plans
             } else {
-                exact_replay_plans
+                best_by_origin.into_values().collect()
             }
         } else {
             replay_plans
@@ -1151,6 +1115,40 @@ where
         let mut saved_primary_by_origin: std::collections::HashMap<String, Vec<u8>> =
             std::collections::HashMap::new();
         for plan in final_plans {
+            let mut plan = plan;
+            if self.settings.derandomize && plan.forced_value.is_none() {
+                let backend = Rc::new(RefCell::new(plan.backend()));
+                let tc_result = run_test_case(
+                    TestBackend::Local {
+                        backend: Rc::clone(&backend),
+                    },
+                    &mut test_fn,
+                    false,
+                    verbosity,
+                    &got_interesting,
+                );
+                if matches!(tc_result, TestCaseResult::Interesting { .. }) {
+                    let recorded_choices = backend.borrow().recorded_choices().to_vec();
+                    if let Some(result) = backend
+                        .borrow()
+                        .observed_first_value()
+                        .and_then(|(schema, value)| {
+                            shrink_local_observation(
+                                plan.seed.unwrap_or(0),
+                                &schema,
+                                &value,
+                                &choices_to_bytes(&recorded_choices),
+                                &mut test_fn,
+                                verbosity,
+                                &got_interesting,
+                            )
+                        })
+                    {
+                        plan.forced_value = Some(result.forced_value);
+                        plan.downgraded_primary_bytes = result.downgraded_primary_bytes;
+                    }
+                }
+            }
             let backend = Rc::new(RefCell::new(plan.backend()));
             if let Some(value) = &plan.forced_value {
                 backend
@@ -1294,7 +1292,14 @@ struct LocalReplayPlan {
 #[cfg(feature = "rust-core")]
 impl LocalReplayPlan {
     fn sort_key(&self) -> Option<ExampleSortKey> {
-        self.forced_value.as_ref().map(ForcedLocalValue::sort_key)
+        self.forced_value
+            .as_ref()
+            .map(ForcedLocalValue::sort_key)
+            .or_else(|| {
+                self.replay_choices
+                    .as_ref()
+                    .map(|choices| ExampleSortKey::from_choices(choices))
+            })
     }
 
     fn backend(&self) -> LocalBackend {
