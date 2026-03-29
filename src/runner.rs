@@ -2139,7 +2139,7 @@ fn local_value_candidate_bytes_if_interesting<F: FnMut(TestCase)>(
         .borrow()
         .observed_first_value()
         .and_then(|(_, value)| {
-            if value == candidate.clone().into_data_value() {
+            if value.same_observed_value(&candidate.clone().into_data_value()) {
                 Some(choices_to_bytes(backend.borrow().recorded_choices()))
             } else {
                 None
