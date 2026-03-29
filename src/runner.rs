@@ -53,6 +53,7 @@ use hegel_core::shrink::{
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_dict_observation as shrink_core_integer_dict_observation,
+    shrink_integer_list_list_forced_value,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_forced_value,
@@ -2350,31 +2351,33 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_integer_list_list_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_integer_list_list_forced_value(
                 integers,
                 *min_size,
                 *inner_min_size,
-                min_value
-                    .and_then(|value| i64::try_from(value).ok())
-                    .unwrap_or(i64::MIN),
-                max_value
-                    .and_then(|value| i64::try_from(value).ok())
-                    .unwrap_or(i64::MAX),
+                min_value.and_then(|value| i64::try_from(value).ok()),
+                max_value.and_then(|value| i64::try_from(value).ok()),
                 *inner_unique,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::IntegerListList {
-                    values,
-                    min_size: *min_size,
-                    inner_min_size: *inner_min_size,
-                    inner_element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
-                    inner_element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
-                    inner_unique: *inner_unique,
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::IntegerListList {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            inner_min_size: *inner_min_size,
+                            inner_element_min_value: min_value
+                                .and_then(|value| i64::try_from(value).ok()),
+                            inner_element_max_value: max_value
+                                .and_then(|value| i64::try_from(value).ok()),
+                            inner_unique: *inner_unique,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2969,45 +2972,6 @@ fn shrink_boolean_list_list_observation<F: FnMut(TestCase)>(
                     min_size,
                     inner_min_size,
                     inner_max_size,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_list_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<Vec<i64>>,
-    min_size: usize,
-    inner_min_size: usize,
-    min_value: i64,
-    max_value: i64,
-    inner_unique: bool,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<Vec<i64>>> {
-    Some(shrink_core_integer_list_list_observation(
-        current,
-        min_size,
-        inner_min_size,
-        min_value,
-        max_value,
-        inner_unique,
-        |candidate: &[Vec<i64>]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::IntegerListList {
-                    values: candidate.to_vec(),
-                    min_size,
-                    inner_min_size,
-                    inner_element_min_value: Some(min_value),
-                    inner_element_max_value: Some(max_value),
-                    inner_unique,
                 },
                 test_fn,
                 verbosity,
