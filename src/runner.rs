@@ -38,8 +38,9 @@ use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
     ExampleSortKey, IntegerShrinkObservation, composite_mixed_list_choices,
-    composite_mixed_list_chunks, float_choice_index, has_child_span_with_label,
-    preferred_float_candidates,
+    composite_mixed_list_chunks, flatmap_boolean_list_observation,
+    flatmap_integer_list_list_observation, flatmap_integer_list_observation, float_choice_index,
+    has_child_span_with_label, preferred_float_candidates,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -1824,15 +1825,6 @@ fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
 }
 
 #[cfg(feature = "rust-core")]
-fn has_flatmap_list_span(spans: &[SpanRecord]) -> bool {
-    has_child_span_with_label(
-        spans,
-        crate::test_case::labels::FLAT_MAP,
-        crate::test_case::labels::LIST,
-    )
-}
-
-#[cfg(feature = "rust-core")]
 fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
     seed: u64,
     observed_values: &[(Schema, DataValue)],
@@ -1841,46 +1833,17 @@ fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<DataValue>> {
-    let [
-        (Schema::Integer { min_value, .. }, DataValue::Integer(_)),
-        (
-            Schema::List {
-                elements,
-                unique: false,
-                ..
-            },
-            DataValue::List(values),
-        ),
-    ] = observed_values
-    else {
-        return None;
-    };
-    let Schema::Integer {
-        min_value: element_min_value,
-        max_value: element_max_value,
-    } = elements.as_ref()
-    else {
-        return None;
-    };
-    if !has_flatmap_list_span(spans) {
-        return None;
-    }
-
-    let min_size = min_value
-        .and_then(|value| usize::try_from(value).ok())
-        .unwrap_or(0);
-    let current = values
-        .iter()
-        .map(|value| match value {
-            DataValue::Integer(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
+    let observation = flatmap_integer_list_observation(
+        observed_values,
+        spans,
+        crate::test_case::labels::FLAT_MAP,
+        crate::test_case::labels::LIST,
+    )?;
     let shrunk = shrink_core_integer_list_observation(
-        current,
-        min_size,
-        element_min_value.unwrap_or(i64::MIN),
-        element_max_value.unwrap_or(i64::MAX),
+        observation.values,
+        observation.min_size,
+        observation.element_min_value,
+        observation.element_max_value,
         false,
         |candidate| {
             local_forced_values_are_interesting(
@@ -1911,55 +1874,28 @@ fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<DataValue>> {
-    let [
-        (
-            Schema::Integer {
-                min_value,
-                max_value: _,
-            },
-            DataValue::Integer(_),
-        ),
-        (
-            Schema::List {
-                elements,
-                unique: false,
-                ..
-            },
-            DataValue::List(values),
-        ),
-    ] = observed_values
-    else {
-        return None;
-    };
-    if !matches!(elements.as_ref(), Schema::Boolean { .. }) {
-        return None;
-    }
-    if !has_flatmap_list_span(spans) {
-        return None;
-    }
-
-    let min_size = min_value
-        .and_then(|value| usize::try_from(value).ok())
-        .unwrap_or(0);
-    let current = values
-        .iter()
-        .map(|value| match value {
-            DataValue::Boolean(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let shrunk = shrink_core_dependent_boolean_list_observation(current, min_size, |candidate| {
-        local_forced_values_are_interesting(
-            seed,
-            vec![
-                DataValue::Integer(candidate.len() as i64),
-                DataValue::List(candidate.iter().copied().map(DataValue::Boolean).collect()),
-            ],
-            test_fn,
-            verbosity,
-            got_interesting,
-        )
-    });
+    let observation = flatmap_boolean_list_observation(
+        observed_values,
+        spans,
+        crate::test_case::labels::FLAT_MAP,
+        crate::test_case::labels::LIST,
+    )?;
+    let shrunk = shrink_core_dependent_boolean_list_observation(
+        observation.values,
+        observation.min_size,
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(candidate.len() as i64),
+                    DataValue::List(candidate.iter().copied().map(DataValue::Boolean).collect()),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
 
     Some(vec![
         DataValue::Integer(shrunk.len() as i64),
@@ -1976,76 +1912,24 @@ fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<DataValue>> {
-    let [
-        (
-            Schema::Integer {
-                min_value: _,
-                max_value: _,
-            },
-            DataValue::Integer(width),
-        ),
-        (
-            Schema::List {
-                elements,
-                min_size,
-                unique: false,
-                ..
-            },
-            DataValue::List(values),
-        ),
-    ] = observed_values
-    else {
-        return None;
-    };
-    let Schema::List {
-        elements: inner_elements,
-        min_size: inner_min_size,
-        max_size: inner_max_size,
-        unique: false,
-    } = elements.as_ref()
-    else {
-        return None;
-    };
-    let Schema::Integer {
-        min_value: element_min_value,
-        max_value: element_max_value,
-    } = inner_elements.as_ref()
-    else {
-        return None;
-    };
-    if !has_flatmap_list_span(spans) {
-        return None;
-    }
-    let width = usize::try_from(*width).ok()?;
-    if *inner_min_size != width || *inner_max_size != Some(width) {
-        return None;
-    }
-
-    let current = values
-        .iter()
-        .map(|value| match value {
-            DataValue::List(values) => values
-                .iter()
-                .map(|value| match value {
-                    DataValue::Integer(value) => Some(*value),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>(),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
+    let observation = flatmap_integer_list_list_observation(
+        observed_values,
+        spans,
+        crate::test_case::labels::FLAT_MAP,
+        crate::test_case::labels::LIST,
+    )?;
     let shrunk = shrink_core_integer_list_list_observation(
-        current,
-        *min_size,
-        width,
-        element_min_value.unwrap_or(i64::MIN),
-        element_max_value.unwrap_or(i64::MAX),
+        observation.values,
+        observation.outer_min_size,
+        observation.width,
+        observation.element_min_value,
+        observation.element_max_value,
         false,
         |candidate| {
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(width as i64),
+                    DataValue::Integer(observation.width as i64),
                     DataValue::List(
                         candidate
                             .iter()
@@ -2065,7 +1949,7 @@ fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(width as i64),
+        DataValue::Integer(observation.width as i64),
         DataValue::List(
             shrunk
                 .into_iter()
@@ -2108,7 +1992,11 @@ fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
     if !matches!(elements.as_ref(), Schema::Const { .. }) {
         return None;
     }
-    if !has_flatmap_list_span(spans) {
+    if !has_child_span_with_label(
+        spans,
+        crate::test_case::labels::FLAT_MAP,
+        crate::test_case::labels::LIST,
+    ) {
         return None;
     }
 
