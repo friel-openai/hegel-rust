@@ -37,10 +37,10 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    ExampleSortKey, ForcedValue as ForcedLocalValue, IntegerShrinkObservation,
-    composite_mixed_list_choices, composite_mixed_list_chunks, flatmap_boolean_list_observation,
-    flatmap_integer_list_list_observation, flatmap_integer_list_observation, float_choice_index,
-    has_child_span_with_label, preferred_float_candidates,
+    ExampleSortKey, ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
+    ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
+    flatmap_boolean_list_observation, flatmap_integer_list_list_observation,
+    flatmap_integer_list_observation, has_child_span_with_label, preferred_float_candidates,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -1187,7 +1187,7 @@ where
         for plan in final_plans {
             let mut plan = plan;
             if self.settings.derandomize && plan.forced_value.is_none() {
-                let backend = Rc::new(RefCell::new(plan.backend()));
+                let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&plan)));
                 if !plan.forced_prefix_values.is_empty() {
                     backend
                         .borrow_mut()
@@ -1362,7 +1362,7 @@ where
                     }
                 }
             }
-            let backend = Rc::new(RefCell::new(plan.backend()));
+            let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&plan)));
             if let Some(value) = &plan.forced_value {
                 let mut forced_values = vec![value.clone().into_data_value()];
                 forced_values.extend(plan.forced_prefix_values.iter().skip(1).cloned());
@@ -1431,7 +1431,7 @@ where
         }
 
         if let Some(best_plan) = best_final_display_plan {
-            let backend = Rc::new(RefCell::new(best_plan.backend()));
+            let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&best_plan)));
             if let Some(value) = &best_plan.forced_value {
                 let mut forced_values = vec![value.clone().into_data_value()];
                 forced_values.extend(best_plan.forced_prefix_values.iter().skip(1).cloned());
@@ -1500,37 +1500,12 @@ struct LocalShrinkResult {
 }
 
 #[cfg(feature = "rust-core")]
-#[derive(Clone, Debug)]
-struct LocalReplayPlan {
-    origin: String,
-    seed: Option<u64>,
-    replay_choices: Option<Vec<Choice>>,
-    forced_prefix_values: Vec<DataValue>,
-    forced_value: Option<ForcedLocalValue>,
-    downgraded_primary_bytes: Vec<Vec<u8>>,
-}
-
-#[cfg(feature = "rust-core")]
-impl LocalReplayPlan {
-    fn sort_key(&self) -> Option<ExampleSortKey> {
-        self.forced_value
-            .as_ref()
-            .map(ForcedLocalValue::sort_key)
-            .or_else(|| {
-                self.replay_choices
-                    .as_ref()
-                    .map(|choices| ExampleSortKey::from_choices(choices))
-            })
-    }
-
-    fn backend(&self) -> LocalBackend {
-        match (&self.replay_choices, self.seed) {
-            (Some(choices), Some(seed)) => {
-                LocalBackend::from_seed_and_choices(seed, choices.clone())
-            }
-            (Some(choices), _) => LocalBackend::from_choices(choices.clone()),
-            (None, Some(seed)) => LocalBackend::from_seed(seed),
-            (None, None) => unreachable!("local replay plan requires a seed or exact choices"),
+fn local_backend_from_replay_plan(plan: &LocalReplayPlan) -> LocalBackend {
+    match plan.backend() {
+        ReplayBackend::Choices(choices) => LocalBackend::from_choices(choices),
+        ReplayBackend::Seed(seed) => LocalBackend::from_seed(seed),
+        ReplayBackend::SeedAndChoices { seed, choices } => {
+            LocalBackend::from_seed_and_choices(seed, choices)
         }
     }
 }
@@ -3657,84 +3632,6 @@ fn local_mixed_list_candidate_choices_if_interesting<F: FnMut(TestCase)>(
     );
 
     is_interesting.then(|| backend.borrow().recorded_choices().to_vec())
-}
-
-#[cfg(feature = "rust-core")]
-fn integer_choice_index(value: i64, min_value: Option<i64>, max_value: Option<i64>) -> u64 {
-    let mut shrink_towards = 0i64;
-    if let Some(min_value) = min_value {
-        shrink_towards = shrink_towards.max(min_value);
-    }
-    if let Some(max_value) = max_value {
-        shrink_towards = shrink_towards.min(max_value);
-    }
-    let distance_from_shrink_towards = value.abs_diff(shrink_towards);
-
-    match (min_value, max_value) {
-        (None, None) => zigzag_index(value, shrink_towards),
-        (Some(min_value), None) => {
-            if distance_from_shrink_towards <= shrink_towards.abs_diff(min_value) {
-                zigzag_index(value, shrink_towards)
-            } else {
-                value.abs_diff(min_value)
-            }
-        }
-        (None, Some(max_value)) => {
-            if distance_from_shrink_towards <= max_value.abs_diff(shrink_towards) {
-                zigzag_index(value, shrink_towards)
-            } else {
-                max_value.abs_diff(value)
-            }
-        }
-        (Some(min_value), Some(max_value)) => {
-            let below_distance = shrink_towards.abs_diff(min_value);
-            let above_distance = max_value.abs_diff(shrink_towards);
-            if below_distance < above_distance {
-                if distance_from_shrink_towards <= below_distance {
-                    zigzag_index(value, shrink_towards)
-                } else {
-                    value.abs_diff(min_value)
-                }
-            } else if distance_from_shrink_towards <= above_distance {
-                zigzag_index(value, shrink_towards)
-            } else {
-                max_value.abs_diff(value)
-            }
-        }
-    }
-}
-
-#[cfg(feature = "rust-core")]
-fn string_char_choice_index(value: char) -> u128 {
-    let codepoint = value as u32;
-    let shrink_towards = '0' as u32;
-    let distance = codepoint.abs_diff(shrink_towards) as u128;
-    let tie_break = if codepoint >= shrink_towards { 0 } else { 1 };
-    distance.saturating_mul(2) + tie_break
-}
-
-#[cfg(feature = "rust-core")]
-fn string_sort_key(value: &str, min_size: usize, max_size: Option<usize>) -> (usize, Vec<u128>) {
-    let chars: Vec<char> = value.chars().collect();
-    let mut indices = Vec::with_capacity(chars.len().saturating_mul(2).saturating_add(1));
-    for (index, ch) in chars.iter().enumerate() {
-        indices.push(if index < min_size { 0 } else { 1 });
-        indices.push(string_char_choice_index(*ch));
-    }
-    if max_size.is_none_or(|max_size| chars.len() < max_size) {
-        indices.push(0);
-    }
-    (indices.len(), indices)
-}
-
-#[cfg(feature = "rust-core")]
-fn zigzag_index(value: i64, shrink_towards: i64) -> u64 {
-    let distance = value.abs_diff(shrink_towards);
-    let mut index = distance.saturating_mul(2);
-    if value > shrink_towards {
-        index = index.saturating_sub(1);
-    }
-    index
 }
 
 enum TestCaseResult {
