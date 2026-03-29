@@ -2261,9 +2261,50 @@ fn cbor_to_json(value: &Value) -> Result<serde_json::Value, LocalBackendError> {
             }
             Ok(serde_json::Value::Object(map))
         }
-        Value::Tag(_, _) => Err(LocalBackendError::InvalidRequest(
-            "tagged values are not supported in local schema parsing".to_owned(),
-        )),
+        Value::Tag(tag, value) => match (tag, value.as_ref()) {
+            (2, Value::Bytes(bytes)) => {
+                if bytes.len() > 8 {
+                    return Ok(serde_json::Value::Number(u64::MAX.into()));
+                }
+                let mut integer = 0u128;
+                for byte in bytes {
+                    integer = integer
+                        .checked_mul(256)
+                        .and_then(|value| value.checked_add(u128::from(*byte)))
+                        .ok_or_else(|| {
+                            LocalBackendError::InvalidRequest(
+                                "tagged integer is out of range for local schema parsing"
+                                    .to_owned(),
+                            )
+                        })?;
+                }
+                let value = u64::try_from(integer).unwrap_or(u64::MAX);
+                Ok(serde_json::Value::Number(value.into()))
+            }
+            (3, Value::Bytes(bytes)) => {
+                if bytes.len() > 8 {
+                    return Ok(serde_json::Value::Number(i64::MIN.into()));
+                }
+                let mut integer = 0i128;
+                for byte in bytes {
+                    integer = integer
+                        .checked_mul(256)
+                        .and_then(|value| value.checked_add(i128::from(*byte)))
+                        .ok_or_else(|| {
+                            LocalBackendError::InvalidRequest(
+                                "tagged integer is out of range for local schema parsing"
+                                    .to_owned(),
+                            )
+                        })?;
+                }
+                let integer = -1i128 - integer;
+                let value = i64::try_from(integer).unwrap_or(i64::MIN);
+                Ok(serde_json::Value::Number(value.into()))
+            }
+            _ => Err(LocalBackendError::InvalidRequest(
+                "tagged values are not supported in local schema parsing".to_owned(),
+            )),
+        },
         _ => Err(LocalBackendError::InvalidRequest(
             "unsupported CBOR value in schema".to_owned(),
         )),
