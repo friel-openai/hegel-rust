@@ -43,8 +43,9 @@ use hegel_core::shrink::{
     ReplayPlan as LocalReplayPlan, ReplayPlanMutation as LocalShrinkResult,
     composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
-    flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
-    float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
+    flatmap_integer_list_observation, has_child_span_with_label, integer_list_list_observation,
+    integer_shrink_candidates, integer_tuple_list_observation, float_forced_value,
+    positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
     shrink_binary_forced_value, shrink_boolean_dict_forced_value,
@@ -2240,63 +2241,30 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             Schema::Tuple { elements } if elements.iter().all(|element| matches!(element, Schema::Integer { .. }))
         ) =>
         {
-            let Schema::Tuple { elements } = elements.as_ref() else {
-                unreachable!("guard already ensured tuple schema");
-            };
-            let tuple_min_values = elements
-                .iter()
-                .map(|element| match element {
-                    Schema::Integer { min_value, .. } => min_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MIN),
-                    _ => unreachable!("guard already ensured integer tuple schema"),
-                })
-                .collect::<Vec<_>>();
-            let tuple_max_values = elements
-                .iter()
-                .map(|element| match element {
-                    Schema::Integer { max_value, .. } => max_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MAX),
-                    _ => unreachable!("guard already ensured integer tuple schema"),
-                })
-                .collect::<Vec<_>>();
-            let tuples = values
-                .iter()
-                .map(|value| match value {
-                    DataValue::Tuple(values) => values
-                        .iter()
-                        .map(|value| match value {
-                            DataValue::Integer(value) => i64::try_from(*value).ok(),
-                            _ => None,
-                        })
-                        .collect::<Option<Vec<_>>>(),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let observation = integer_tuple_list_observation(schema, value)?;
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_tuple_list_forced_value(
-                tuples,
-                *min_size,
-                tuple_min_values.clone(),
-                tuple_max_values.clone(),
-                *unique,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::IntegerTupleList {
-                            values: candidate.to_vec(),
-                            min_size: *min_size,
-                            tuple_min_values: tuple_min_values.clone(),
-                            tuple_max_values: tuple_max_values.clone(),
-                            unique: *unique,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
+                    observation.values,
+                    observation.min_size,
+                    observation.tuple_min_values.clone(),
+                    observation.tuple_max_values.clone(),
+                    observation.unique,
+                    |candidate| {
+                        local_value_candidate_is_interesting(
+                            seed,
+                            &ForcedLocalValue::IntegerTupleList {
+                                values: candidate.to_vec(),
+                                min_size: observation.min_size,
+                                tuple_min_values: observation.tuple_min_values.clone(),
+                                tuple_max_values: observation.tuple_max_values.clone(),
+                                unique: observation.unique,
+                            },
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2316,62 +2284,32 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             } if matches!(elements.as_ref(), Schema::Integer { .. })
         ) =>
         {
-            let Schema::List {
-                elements: inner_elements,
-                min_size: inner_min_size,
-                max_size: _,
-                unique: inner_unique,
-            } = elements.as_ref()
-            else {
-                unreachable!("guard already ensured nested list schema");
-            };
-            let Schema::Integer {
-                min_value,
-                max_value,
-            } = inner_elements.as_ref()
-            else {
-                unreachable!("guard already ensured integer element schema");
-            };
-            let integers = values
-                .iter()
-                .map(|value| match value {
-                    DataValue::List(values) => values
-                        .iter()
-                        .map(|value| match value {
-                            DataValue::Integer(value) => i64::try_from(*value).ok(),
-                            _ => None,
-                        })
-                        .collect::<Option<Vec<_>>>(),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let observation = integer_list_list_observation(schema, value)?;
             Some(LocalShrinkResult {
                 forced_value: shrink_integer_list_list_forced_value(
-                integers,
-                *min_size,
-                *inner_min_size,
-                min_value.and_then(|value| i64::try_from(value).ok()),
-                max_value.and_then(|value| i64::try_from(value).ok()),
-                *inner_unique,
-                |candidate| {
-                    local_value_candidate_is_interesting(
-                        seed,
-                        &ForcedLocalValue::IntegerListList {
-                            values: candidate.to_vec(),
-                            min_size: *min_size,
-                            inner_min_size: *inner_min_size,
-                            inner_element_min_value: min_value
-                                .and_then(|value| i64::try_from(value).ok()),
-                            inner_element_max_value: max_value
-                                .and_then(|value| i64::try_from(value).ok()),
-                            inner_unique: *inner_unique,
-                        },
-                        test_fn,
-                        verbosity,
-                        got_interesting,
-                    )
-                },
-            ),
+                    observation.values,
+                    observation.min_size,
+                    observation.inner_min_size,
+                    observation.inner_element_min_value,
+                    observation.inner_element_max_value,
+                    observation.inner_unique,
+                    |candidate| {
+                        local_value_candidate_is_interesting(
+                            seed,
+                            &ForcedLocalValue::IntegerListList {
+                                values: candidate.to_vec(),
+                                min_size: observation.min_size,
+                                inner_min_size: observation.inner_min_size,
+                                inner_element_min_value: observation.inner_element_min_value,
+                                inner_element_max_value: observation.inner_element_max_value,
+                                inner_unique: observation.inner_unique,
+                            },
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
