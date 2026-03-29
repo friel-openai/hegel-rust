@@ -34,6 +34,7 @@ use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
     float_choice_index, preferred_float_candidates,
+    shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
@@ -1331,6 +1332,12 @@ enum ForcedLocalValue {
         min_size: usize,
         max_size: Option<usize>,
     },
+    BooleanListList {
+        values: Vec<Vec<bool>>,
+        min_size: usize,
+        inner_min_size: usize,
+        inner_max_size: Option<usize>,
+    },
     FloatList {
         values: Vec<f64>,
         min_size: usize,
@@ -1369,6 +1376,12 @@ impl ForcedLocalValue {
             Self::BooleanList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Boolean).collect())
             }
+            Self::BooleanListList { values, .. } => DataValue::List(
+                values
+                    .into_iter()
+                    .map(|values| DataValue::List(values.into_iter().map(DataValue::Boolean).collect()))
+                    .collect(),
+            ),
             Self::FloatList { values, .. } => {
                 DataValue::List(values.into_iter().map(DataValue::Float).collect())
             }
@@ -1429,6 +1442,26 @@ impl ForcedLocalValue {
                 if max_size.is_none_or(|max_size| values.len() < max_size) {
                     indices.push(0);
                 }
+                (indices.len(), indices)
+            }
+            Self::BooleanListList {
+                values,
+                min_size,
+                inner_min_size,
+                inner_max_size,
+            } => {
+                let mut indices = Vec::new();
+                for (index, values) in values.iter().enumerate().rev() {
+                    indices.push(if index < *min_size { 0 } else { 1 });
+                    for (inner_index, value) in values.iter().enumerate().rev() {
+                        indices.push(if inner_index < *inner_min_size { 0 } else { 1 });
+                        indices.push(u128::from(*value));
+                    }
+                    if inner_max_size.is_none_or(|max_size| values.len() < max_size) {
+                        indices.push(0);
+                    }
+                }
+                indices.push(0);
                 (indices.len(), indices)
             }
             Self::FloatList {
@@ -1562,6 +1595,62 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             },
             downgraded_primary_bytes: Vec::new(),
         }),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                max_size,
+                unique: _,
+            },
+            DataValue::List(values),
+        ) if matches!(
+            elements.as_ref(),
+            Schema::List {
+                elements,
+                ..
+            } if matches!(elements.as_ref(), Schema::Boolean { .. })
+        ) => {
+            let Schema::List {
+                min_size: inner_min_size,
+                max_size: inner_max_size,
+                ..
+            } = elements.as_ref()
+            else {
+                unreachable!("guard already ensured nested list schema");
+            };
+            let booleans = values
+                .iter()
+                .map(|value| match value {
+                    DataValue::List(values) => values
+                        .iter()
+                        .map(|value| match value {
+                            DataValue::Boolean(value) => Some(*value),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>(),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            shrink_boolean_list_list_observation(
+                seed,
+                booleans,
+                *min_size,
+                *inner_min_size,
+                *inner_max_size,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .map(|values| LocalShrinkResult {
+                forced_value: ForcedLocalValue::BooleanListList {
+                    values,
+                    min_size: *min_size,
+                    inner_min_size: *inner_min_size,
+                    inner_max_size: *inner_max_size,
+                },
+                downgraded_primary_bytes: Vec::new(),
+            })
+        }
         (
             Schema::List {
                 elements,
@@ -1829,6 +1918,38 @@ fn shrink_boolean_list_observation<F: FnMut(TestCase)>(
                     values: candidate.to_vec(),
                     min_size,
                     max_size,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    ))
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_boolean_list_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    current: Vec<Vec<bool>>,
+    min_size: usize,
+    inner_min_size: usize,
+    inner_max_size: Option<usize>,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Vec<bool>>> {
+    Some(shrink_core_boolean_list_list_observation(
+        current,
+        min_size,
+        inner_min_size,
+        |candidate: &[Vec<bool>]| {
+            local_value_candidate_is_interesting(
+                seed,
+                &ForcedLocalValue::BooleanListList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    inner_min_size,
+                    inner_max_size,
                 },
                 test_fn,
                 verbosity,
