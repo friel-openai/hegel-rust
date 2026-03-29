@@ -33,8 +33,8 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    float_choice_index, integer_shrink_candidates, positive_float_as_integer_ratio,
-    preferred_float_candidates,
+    float_choice_index, preferred_float_candidates,
+    shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_observation as shrink_core_integer_observation, ExampleSortKey,
     IntegerShrinkObservation,
@@ -1748,7 +1748,7 @@ fn shrink_float_observation<F: FnMut(TestCase)>(
 #[cfg(feature = "rust-core")]
 fn shrink_float_list_observation<F: FnMut(TestCase)>(
     seed: u64,
-    mut current: Vec<f64>,
+    current: Vec<f64>,
     initial_primary_bytes: &[u8],
     min_size: usize,
     min_value: Option<f64>,
@@ -1759,198 +1759,34 @@ fn shrink_float_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<(Vec<f64>, Vec<Vec<u8>>)> {
-    let mut current_primary_bytes = initial_primary_bytes.to_vec();
-    append_local_float_list_trace("float-list-initial", &current, &current_primary_bytes);
-
-    if let Some(zeroed_bytes) = local_value_candidate_bytes_if_interesting(
-        seed,
-        &ForcedLocalValue::FloatList {
-            values: vec![0.0; current.len()],
-            min_size,
-            element_min_value: min_value,
-            element_max_value: max_value,
-            allow_nan,
-            allow_infinity,
+    let (current, _current_primary_bytes) = shrink_core_float_list_observation(
+        current,
+        initial_primary_bytes.to_vec(),
+        min_size,
+        min_value,
+        max_value,
+        allow_nan,
+        allow_infinity,
+        |candidate| {
+            local_value_candidate_bytes_if_interesting(
+                seed,
+                &ForcedLocalValue::FloatList {
+                    values: candidate.to_vec(),
+                    min_size,
+                    element_min_value: min_value,
+                    element_max_value: max_value,
+                    allow_nan,
+                    allow_infinity,
+                },
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
         },
-        test_fn,
-        verbosity,
-        got_interesting,
-    ) {
-        append_local_float_list_trace("float-list-zero", &vec![0.0; current.len()], &zeroed_bytes);
-        current = vec![0.0; current.len()];
-        current_primary_bytes = zeroed_bytes;
-    }
-
-    while current.len() > min_size {
-        let candidate = current[..current.len() - 1].to_vec();
-        if let Some(candidate_bytes) = local_value_candidate_bytes_if_interesting(
-            seed,
-            &ForcedLocalValue::FloatList {
-                values: candidate.clone(),
-                min_size,
-                element_min_value: min_value,
-                element_max_value: max_value,
-                allow_nan,
-                allow_infinity,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            append_local_float_list_trace("float-list-delete-tail", &candidate, &candidate_bytes);
-            current = candidate;
-            current_primary_bytes = candidate_bytes;
-        } else {
-            break;
-        }
-    }
-
-    let mut sorted_candidate = current.clone();
-    sorted_candidate.sort_by_key(|value| {
-        float_choice_index(*value)
-    });
-    if sorted_candidate != current {
-        if let Some(candidate_bytes) = local_value_candidate_bytes_if_interesting(
-            seed,
-            &ForcedLocalValue::FloatList {
-                values: sorted_candidate.clone(),
-                min_size,
-                element_min_value: min_value,
-                element_max_value: max_value,
-                allow_nan,
-                allow_infinity,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            append_local_float_list_trace("float-list-sort", &sorted_candidate, &candidate_bytes);
-            current = sorted_candidate;
-            current_primary_bytes = candidate_bytes;
-        }
-    }
-
-    for index in 0..current.len() {
-        let (next_value, next_primary_bytes) = shrink_float_at_list_index(
-            seed,
-            &current,
-            &current_primary_bytes,
-            min_size,
-            min_value,
-            max_value,
-            allow_nan,
-            allow_infinity,
-            index,
-            test_fn,
-            verbosity,
-            got_interesting,
-        )?;
-        current[index] = next_value;
-        current_primary_bytes = next_primary_bytes;
-    }
+        |event, values, bytes| append_local_float_list_trace(event, values, bytes),
+    );
 
     Some((current, Vec::new()))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_float_at_list_index<F: FnMut(TestCase)>(
-    seed: u64,
-    current: &[f64],
-    current_primary_bytes: &[u8],
-    min_size: usize,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-    index: usize,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<(f64, Vec<u8>)> {
-    let mut best = current[index];
-    let mut best_primary_bytes = current_primary_bytes.to_vec();
-    let better_than_best = |candidate: f64, best: f64| {
-        float_choice_index(candidate) < float_choice_index(best)
-    };
-    let mut consider_candidate = |candidate: f64,
-                                  best: &mut f64,
-                                  best_primary_bytes: &mut Vec<u8>|
-     -> bool {
-        if !better_than_best(candidate, *best) {
-            return false;
-        }
-        let mut probe = current.to_vec();
-        probe[index] = candidate;
-        let traced_probe = probe.clone();
-        let Some(candidate_bytes) = local_value_candidate_bytes_if_interesting(
-            seed,
-            &ForcedLocalValue::FloatList {
-                values: probe,
-                min_size,
-                element_min_value: min_value,
-                element_max_value: max_value,
-                allow_nan,
-                allow_infinity,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) else {
-            return false;
-        };
-        append_local_float_list_trace("float-list-index", &traced_probe, &candidate_bytes);
-        *best = candidate;
-        *best_primary_bytes = candidate_bytes;
-        true
-    };
-
-    for power in 0..10 {
-        let scale = 2f64.powi(power);
-        let scaled = best.abs() * scale;
-        let _ = consider_candidate(
-            scaled.floor() / scale,
-            &mut best,
-            &mut best_primary_bytes,
-        );
-        let _ = consider_candidate(
-            scaled.ceil() / scale,
-            &mut best,
-            &mut best_primary_bytes,
-        );
-    }
-
-    if consider_candidate(
-        best.abs().trunc(),
-        &mut best,
-        &mut best_primary_bytes,
-    ) {
-        return Some((best, best_primary_bytes));
-    }
-
-    for candidate in preferred_float_candidates(min_value, max_value, allow_nan, allow_infinity) {
-        let _ = consider_candidate(
-            candidate,
-            &mut best,
-            &mut best_primary_bytes,
-        );
-    }
-
-    if let Some((numerator, denominator)) = positive_float_as_integer_ratio(best.abs()) {
-        let integral = numerator / denominator;
-        let remainder = numerator % denominator;
-        if integral > 0 {
-            for candidate_integral in integer_shrink_candidates(integral) {
-                let candidate = (candidate_integral as f64 * denominator as f64 + remainder as f64)
-                    / denominator as f64;
-                let _ = consider_candidate(
-                    candidate,
-                    &mut best,
-                    &mut best_primary_bytes,
-                );
-            }
-        }
-    }
-    Some((best, best_primary_bytes))
 }
 
 #[cfg(feature = "rust-core")]
