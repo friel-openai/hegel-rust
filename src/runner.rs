@@ -44,8 +44,8 @@ use hegel_core::shrink::{
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
     positive_float_as_integer_ratio, preferred_float_candidates,
-    probe_integer_containment_mutation_plan, probe_one_of_replay_choices,
-    select_best_replay_plans,
+    probe_integer_containment_mutation_plan, probe_mixed_list_replay_choices,
+    probe_one_of_replay_choices, select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
@@ -2154,43 +2154,15 @@ fn shrink_local_mixed_list_observation<F: FnMut(TestCase)>(
     verbosity: Verbosity,
     got_interesting: &Arc<AtomicBool>,
 ) -> Option<Vec<Choice>> {
-    let (
-        Schema::List {
-            elements, min_size, ..
-        },
-        DataValue::List(values),
-    ) = (schema, value)
-    else {
-        return None;
-    };
-    let Schema::OneOf { .. } = elements.as_ref() else {
-        return None;
-    };
-    let simplest_element = generate_simplest_value(elements).ok()?;
-
-    let shrunk = shrink_core_list_observation(
-        values.clone(),
-        *min_size,
-        |_| simplest_element.clone(),
-        |candidate| {
-            local_mixed_list_candidate_choices_if_interesting(
-                seed,
-                candidate,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .is_some()
-        },
-    );
-
-    local_mixed_list_candidate_choices_if_interesting(
-        seed,
-        &shrunk,
-        test_fn,
-        verbosity,
-        got_interesting,
-    )
+    probe_mixed_list_replay_choices(schema, value, |candidate| {
+        local_mixed_list_candidate_choices_if_interesting(
+            seed,
+            candidate,
+            test_fn,
+            verbosity,
+            got_interesting,
+        )
+    })
 }
 
 #[cfg(feature = "rust-core")]
