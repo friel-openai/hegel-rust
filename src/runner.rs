@@ -34,6 +34,8 @@ use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_repla
 #[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
+use hegel_core::shrink::ExampleSortKey;
+#[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
 #[cfg(feature = "rust-core")]
 use std::io::Write;
@@ -1133,7 +1135,7 @@ where
         let mut best_final_choices: Option<Vec<Choice>> = None;
         let mut best_final_bytes: Option<Vec<u8>> = None;
         let mut best_final_display_plan: Option<LocalReplayPlan> = None;
-        let mut best_final_display_sort_key: Option<(usize, Vec<u128>)> = None;
+        let mut best_final_display_sort_key: Option<ExampleSortKey> = None;
         let mut downgraded_primary_bytes = Vec::new();
         let mut saved_primary_by_origin: std::collections::HashMap<String, Vec<u8>> =
             std::collections::HashMap::new();
@@ -1186,7 +1188,7 @@ where
                 }
                 let display_sort_key = {
                     let recorded_bytes = recorded_bytes.clone();
-                    (
+                    ExampleSortKey::from_parts(
                         recorded_bytes.len(),
                         recorded_bytes.into_iter().map(u128::from).collect(),
                     )
@@ -1280,7 +1282,7 @@ struct LocalReplayPlan {
 
 #[cfg(feature = "rust-core")]
 impl LocalReplayPlan {
-    fn sort_key(&self) -> Option<(usize, Vec<u128>)> {
+    fn sort_key(&self) -> Option<ExampleSortKey> {
         self.forced_value.as_ref().map(ForcedLocalValue::sort_key)
     }
 
@@ -1360,8 +1362,8 @@ impl ForcedLocalValue {
         }
     }
 
-    fn sort_key(&self) -> (usize, Vec<u128>) {
-        match self {
+    fn sort_key(&self) -> ExampleSortKey {
+        let (length, indices) = match self {
             Self::Float {
                 value,
                 min_value,
@@ -1467,7 +1469,8 @@ impl ForcedLocalValue {
                 indices.push(0);
                 (indices.len(), indices)
             }
-        }
+        };
+        ExampleSortKey::from_parts(length, indices)
     }
 }
 
