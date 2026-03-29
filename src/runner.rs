@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 #[cfg(feature = "rust-core")]
-use crate::local_backend::LocalBackend;
+use crate::local_backend::{LocalBackend, LocalSpanRecord};
 #[cfg(feature = "rust-core")]
 use hegel_core::choices::{Choice, choices_from_bytes, choices_to_bytes, shortlex_cmp};
 #[cfg(feature = "rust-core")]
@@ -40,6 +40,7 @@ use hegel_core::shrink::{
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
     shrink_boolean_observation as shrink_core_boolean_observation,
+    shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_dict_observation as shrink_core_integer_dict_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
@@ -1199,6 +1200,7 @@ where
                 if matches!(tc_result, TestCaseResult::Interesting { .. }) {
                     let recorded_choices = backend.borrow().recorded_choices().to_vec();
                     let observed_values = backend.borrow().observed_values().to_vec();
+                    let spans = backend.borrow().spans().to_vec();
                     if let Some((forced_value, forced_second_value)) =
                         shrink_local_integer_containment_observation(
                             plan.seed.unwrap_or(0),
@@ -1225,6 +1227,30 @@ where
                         shrink_local_separated_integer_pair_observation(
                             plan.seed.unwrap_or(0),
                             &observed_values,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_flatmap_boolean_list_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &spans,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
+                        plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_flatmap_integer_list_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &spans,
                             &mut test_fn,
                             verbosity,
                             &got_interesting,
@@ -1261,6 +1287,18 @@ where
                     {
                         plan.replay_choices = Some(replay_choices);
                         plan.forced_prefix_values = Vec::new();
+                        plan.forced_value = None;
+                    } else if let Some(forced_prefix_values) =
+                        shrink_local_integer_fill_const_list_observation(
+                            plan.seed.unwrap_or(0),
+                            &observed_values,
+                            &spans,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.forced_prefix_values = forced_prefix_values;
                         plan.forced_value = None;
                     } else if let Some(forced_prefix_values) =
                         shrink_local_boolean_fill_const_list_observation(
@@ -1754,6 +1792,235 @@ fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
         middle_bool,
         middle_integer,
         DataValue::Integer(shrunk[1]),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
+fn has_flatmap_list_span(spans: &[LocalSpanRecord]) -> bool {
+    spans.iter().any(|span| {
+        span.label == crate::test_case::labels::FLAT_MAP
+            && span
+                .children
+                .iter()
+                .any(|child| spans[*child].label == crate::test_case::labels::LIST)
+    })
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    spans: &[LocalSpanRecord],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (Schema::Integer { min_value, .. }, DataValue::Integer(_)),
+        (
+            Schema::List {
+                elements,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    let Schema::Integer {
+        min_value: element_min_value,
+        max_value: element_max_value,
+    } = elements.as_ref()
+    else {
+        return None;
+    };
+    if !has_flatmap_list_span(spans) {
+        return None;
+    }
+
+    let min_size = min_value
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0);
+    let current = values
+        .iter()
+        .map(|value| match value {
+            DataValue::Integer(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let shrunk = shrink_core_integer_list_observation(
+        current,
+        min_size,
+        element_min_value.unwrap_or(i64::MIN),
+        element_max_value.unwrap_or(i64::MAX),
+        false,
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(candidate.len() as i64),
+                    DataValue::List(candidate.iter().copied().map(DataValue::Integer).collect()),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+
+    Some(vec![
+        DataValue::Integer(shrunk.len() as i64),
+        DataValue::List(shrunk.into_iter().map(DataValue::Integer).collect()),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    spans: &[LocalSpanRecord],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (
+            Schema::Integer {
+                min_value,
+                max_value: _,
+            },
+            DataValue::Integer(_),
+        ),
+        (
+            Schema::List {
+                elements,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    if !matches!(elements.as_ref(), Schema::Boolean { .. }) {
+        return None;
+    }
+    if !has_flatmap_list_span(spans) {
+        return None;
+    }
+
+    let min_size = min_value
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0);
+    let current = values
+        .iter()
+        .map(|value| match value {
+            DataValue::Boolean(value) => Some(*value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let shrunk = shrink_core_dependent_boolean_list_observation(current, min_size, |candidate| {
+        local_forced_values_are_interesting(
+            seed,
+            vec![
+                DataValue::Integer(candidate.len() as i64),
+                DataValue::List(candidate.iter().copied().map(DataValue::Boolean).collect()),
+            ],
+            test_fn,
+            verbosity,
+            got_interesting,
+        )
+    });
+
+    Some(vec![
+        DataValue::Integer(shrunk.len() as i64),
+        DataValue::List(shrunk.into_iter().map(DataValue::Boolean).collect()),
+    ])
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    observed_values: &[(Schema, DataValue)],
+    spans: &[LocalSpanRecord],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<DataValue>> {
+    let [
+        (
+            Schema::Integer {
+                min_value,
+                max_value,
+            },
+            DataValue::Integer(value),
+        ),
+        (
+            Schema::List {
+                elements,
+                min_size,
+                unique: false,
+                ..
+            },
+            DataValue::List(values),
+        ),
+    ] = observed_values
+    else {
+        return None;
+    };
+    if !matches!(elements.as_ref(), Schema::Const { .. }) {
+        return None;
+    }
+    if !has_flatmap_list_span(spans) {
+        return None;
+    }
+
+    let current_value = shrink_core_integer_observation(
+        IntegerShrinkObservation {
+            min_value: min_value.unwrap_or(i64::MIN),
+            max_value: max_value.unwrap_or(i64::MAX),
+            value: *value,
+        },
+        |candidate| {
+            local_forced_values_are_interesting(
+                seed,
+                vec![
+                    DataValue::Integer(candidate),
+                    DataValue::List(vec![DataValue::Null; values.len()]),
+                ],
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+        },
+    );
+
+    let mut low = *min_size;
+    let mut high = values.len();
+    while low < high {
+        let mid = low + ((high - low) / 2);
+        if local_forced_values_are_interesting(
+            seed,
+            vec![
+                DataValue::Integer(current_value),
+                DataValue::List(vec![DataValue::Null; mid]),
+            ],
+            test_fn,
+            verbosity,
+            got_interesting,
+        ) {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+
+    Some(vec![
+        DataValue::Integer(current_value),
+        DataValue::List(vec![DataValue::Null; low]),
     ])
 }
 
