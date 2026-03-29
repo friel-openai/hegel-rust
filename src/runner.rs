@@ -32,12 +32,14 @@ use hegel_core::database::ExampleDatabase;
 #[cfg(feature = "rust-core")]
 use hegel_core::engine::generate_simplest_value;
 #[cfg(feature = "rust-core")]
-use hegel_core::runtime::{save_corpus_replacement, save_interesting_origin_replacement};
+use hegel_core::runtime::{
+    FinalReplayTracker, save_corpus_replacement, save_interesting_origin_replacement,
+};
 #[cfg(feature = "rust-core")]
 use hegel_core::schema::{DataValue, Schema};
 #[cfg(feature = "rust-core")]
 use hegel_core::shrink::{
-    ExampleSortKey, ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
+    ForcedValue as ForcedLocalValue, IntegerShrinkObservation, ReplayBackend,
     ReplayPlan as LocalReplayPlan, composite_mixed_list_choices, composite_mixed_list_chunks,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
@@ -57,8 +59,6 @@ use hegel_core::shrink::{
     shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
     shrink_list_observation as shrink_core_list_observation,
 };
-#[cfg(feature = "rust-core")]
-use std::cmp::Ordering as CmpOrdering;
 #[cfg(feature = "rust-core")]
 use std::io::Write;
 
@@ -1169,11 +1169,7 @@ where
 
         let mut final_result: Option<TestCaseResult> = None;
         let final_plans = select_best_replay_plans(replay_plans, self.settings.derandomize);
-        let mut best_final_choices: Option<Vec<Choice>> = None;
-        let mut best_final_bytes: Option<Vec<u8>> = None;
-        let mut best_final_display_plan: Option<LocalReplayPlan> = None;
-        let mut best_final_display_sort_key: Option<ExampleSortKey> = None;
-        let mut downgraded_primary_bytes = Vec::new();
+        let mut final_replay_tracker = FinalReplayTracker::new();
         let mut saved_primary_by_origin: std::collections::HashMap<String, Vec<u8>> =
             std::collections::HashMap::new();
         for plan in final_plans {
@@ -1392,31 +1388,19 @@ where
                         saved_primary_by_origin.insert(origin.clone(), recorded_bytes.clone());
                     }
                 }
-                if best_final_bytes.as_ref().is_none_or(|existing| {
-                    shortlex_cmp(&recorded_bytes, existing) == CmpOrdering::Less
-                }) {
-                    append_local_history_trace("accepted-primary", &recorded_bytes);
-                    downgraded_primary_bytes.extend(plan.downgraded_primary_bytes.clone());
-                    if let Some(existing) = &best_final_bytes {
-                        append_local_history_trace("demoted-primary", existing);
-                        downgraded_primary_bytes.push(existing.clone());
-                    }
-                    best_final_bytes = Some(recorded_bytes.clone());
-                    best_final_choices = Some(recorded_choices.clone());
-                }
-                let display_sort_key = ExampleSortKey::from_choices(&recorded_choices);
-                if best_final_display_sort_key
-                    .as_ref()
-                    .is_none_or(|existing| &display_sort_key < existing)
+                if let Some(update) =
+                    final_replay_tracker.consider_interesting(&plan, recorded_choices)
                 {
-                    best_final_display_sort_key = Some(display_sort_key);
-                    best_final_display_plan = Some(plan.clone());
+                    append_local_history_trace("accepted-primary", &update.accepted_primary_bytes);
+                    if let Some(existing) = &update.demoted_primary_bytes {
+                        append_local_history_trace("demoted-primary", existing);
+                    }
                 }
                 final_result = Some(tc_result);
             }
         }
 
-        if let Some(best_plan) = best_final_display_plan {
+        if let Some(best_plan) = final_replay_tracker.best_display_plan() {
             let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&best_plan)));
             if let Some(value) = &best_plan.forced_value {
                 let mut forced_values = vec![value.clone().into_data_value()];
@@ -1442,16 +1426,20 @@ where
         }
 
         if let (Some(database), Some(database_key), Some(choices)) =
-            (&database, database_key, best_final_choices.as_ref())
+            (&database, database_key, final_replay_tracker.best_choices())
         {
             let bytes = choices_to_bytes(choices);
-            for previous_primary in &downgraded_primary_bytes {
+            for previous_primary in final_replay_tracker.demoted_primary_bytes() {
                 if previous_primary == &bytes {
                     continue;
                 }
                 append_local_history_trace("saved-secondary", &previous_primary);
             }
-            database.save_corpus_replacement(database_key, &bytes, &downgraded_primary_bytes);
+            database.save_corpus_replacement(
+                database_key,
+                &bytes,
+                final_replay_tracker.demoted_primary_bytes(),
+            );
         }
 
         if got_interesting.load(Ordering::SeqCst) {
