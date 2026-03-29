@@ -46,20 +46,20 @@ use hegel_core::shrink::{
     float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
-    shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
+    shrink_boolean_dict_forced_value,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
     shrink_boolean_forced_value,
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
-    shrink_integer_dict_observation as shrink_core_integer_dict_observation,
+    shrink_integer_dict_forced_value,
     shrink_integer_list_list_forced_value,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
     shrink_integer_forced_value,
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
-    shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
+    shrink_integer_string_dict_forced_value,
     shrink_integer_tuple_list_forced_value,
 };
 #[cfg(feature = "rust-core")]
@@ -2415,8 +2415,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_integer_dict_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_integer_dict_forced_value(
                 entries,
                 *min_size,
                 key_min_value
@@ -2431,27 +2431,31 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 value_max_value
                     .and_then(|value| i64::try_from(value).ok())
                     .unwrap_or(i64::MAX),
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::IntegerDict {
-                    values,
-                    min_size: *min_size,
-                    key_min_value: key_min_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MIN),
-                    key_max_value: key_max_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MAX),
-                    value_min_value: value_min_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MIN),
-                    value_max_value: value_max_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MAX),
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::IntegerDict {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            key_min_value: key_min_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MIN),
+                            key_max_value: key_max_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MAX),
+                            value_min_value: value_min_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MIN),
+                            value_max_value: value_max_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MAX),
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2489,8 +2493,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_integer_string_dict_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_integer_string_dict_forced_value(
                 entries,
                 *min_size,
                 key_min_value
@@ -2500,22 +2504,26 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     .and_then(|value| i64::try_from(value).ok())
                     .unwrap_or(i64::MAX),
                 *value_min_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::IntegerStringDict {
-                    values,
-                    min_size: *min_size,
-                    key_min_value: key_min_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MIN),
-                    key_max_value: key_max_value
-                        .and_then(|value| i64::try_from(value).ok())
-                        .unwrap_or(i64::MAX),
-                    value_min_size: *value_min_size,
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::IntegerStringDict {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            key_min_value: key_min_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MIN),
+                            key_max_value: key_max_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MAX),
+                            value_min_size: *value_min_size,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2537,19 +2545,23 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_boolean_dict_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_boolean_dict_forced_value(
                 entries,
                 *min_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::BooleanDict {
-                    values,
-                    min_size: *min_size,
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::BooleanDict {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2972,108 +2984,6 @@ fn shrink_boolean_list_list_observation<F: FnMut(TestCase)>(
                     min_size,
                     inner_min_size,
                     inner_max_size,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_dict_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<(i64, i64)>,
-    min_size: usize,
-    key_min_value: i64,
-    key_max_value: i64,
-    value_min_value: i64,
-    value_max_value: i64,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<(i64, i64)>> {
-    Some(shrink_core_integer_dict_observation(
-        current,
-        min_size,
-        key_min_value,
-        key_max_value,
-        value_min_value,
-        value_max_value,
-        |candidate: &[(i64, i64)]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::IntegerDict {
-                    values: candidate.to_vec(),
-                    min_size,
-                    key_min_value,
-                    key_max_value,
-                    value_min_value,
-                    value_max_value,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_integer_string_dict_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<(i64, String)>,
-    min_size: usize,
-    key_min_value: i64,
-    key_max_value: i64,
-    value_min_size: usize,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<(i64, String)>> {
-    Some(shrink_core_integer_string_dict_observation(
-        current,
-        min_size,
-        key_min_value,
-        key_max_value,
-        value_min_size,
-        |candidate: &[(i64, String)]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::IntegerStringDict {
-                    values: candidate.to_vec(),
-                    min_size,
-                    key_min_value,
-                    key_max_value,
-                    value_min_size,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_boolean_dict_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<(bool, bool)>,
-    min_size: usize,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<(bool, bool)>> {
-    Some(shrink_core_boolean_dict_observation(
-        current,
-        min_size,
-        |candidate: &[(bool, bool)]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::BooleanDict {
-                    values: candidate.to_vec(),
-                    min_size,
                 },
                 test_fn,
                 verbosity,
