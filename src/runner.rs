@@ -1271,6 +1271,18 @@ where
                         plan.forced_prefix_values = forced_prefix_values;
                         plan.forced_value = None;
                     } else if let Some(replay_choices) =
+                        shrink_local_composite_mixed_list_observation(
+                            &recorded_choices,
+                            &spans,
+                            &mut test_fn,
+                            verbosity,
+                            &got_interesting,
+                        )
+                    {
+                        plan.replay_choices = Some(replay_choices);
+                        plan.forced_prefix_values = Vec::new();
+                        plan.forced_value = None;
+                    } else if let Some(replay_choices) =
                         observed_values.first().and_then(|(schema, value)| {
                             shrink_local_mixed_list_observation(
                                 plan.seed.unwrap_or(0),
@@ -2187,6 +2199,94 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
     }
 
     None
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_composite_mixed_list_observation<F: FnMut(TestCase)>(
+    replay_choices: &[Choice],
+    spans: &[LocalSpanRecord],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Choice>> {
+    let root_span = spans.first()?;
+    if root_span.parent.is_some()
+        || root_span.label != crate::test_case::labels::LIST
+        || root_span.children.is_empty()
+        || root_span.end != replay_choices.len()
+    {
+        return None;
+    }
+
+    let child_label = spans[*root_span.children.first()?].label;
+    let mut current = Vec::new();
+    let mut saw_text_branch = false;
+    let mut saw_bool_branch = false;
+    for &child_index in &root_span.children {
+        let child = spans.get(child_index)?;
+        if child.parent != Some(0)
+            || child.label != child_label
+            || !child.children.is_empty()
+            || child.start >= child.end
+            || child.end > replay_choices.len()
+        {
+            return None;
+        }
+        let chunk = replay_choices[child.start..child.end].to_vec();
+        match chunk.as_slice() {
+            [Choice::Boolean(false), Choice::String(_)] => saw_text_branch = true,
+            [Choice::Boolean(true), Choice::Boolean(_)] => saw_bool_branch = true,
+            _ => return None,
+        }
+        current.push(chunk);
+    }
+    if !saw_text_branch || !saw_bool_branch {
+        return None;
+    }
+
+    let shrunk = shrink_core_list_observation(
+        current,
+        0,
+        |chunk| match chunk.as_slice() {
+            [Choice::Boolean(false), Choice::String(_)] => {
+                vec![Choice::Boolean(false), Choice::String(String::new())]
+            }
+            [Choice::Boolean(true), Choice::Boolean(_)] => {
+                vec![Choice::Boolean(true), Choice::Boolean(false)]
+            }
+            _ => chunk.clone(),
+        },
+        |candidate| {
+            let backend = Rc::new(RefCell::new(LocalBackend::from_choices(
+                local_composite_mixed_list_choices(candidate),
+            )));
+            matches!(
+                run_test_case(
+                    TestBackend::Local {
+                        backend: Rc::clone(&backend),
+                    },
+                    test_fn,
+                    false,
+                    verbosity,
+                    got_interesting,
+                ),
+                TestCaseResult::Interesting { .. }
+            )
+        },
+    );
+
+    Some(local_composite_mixed_list_choices(&shrunk))
+}
+
+#[cfg(feature = "rust-core")]
+fn local_composite_mixed_list_choices(chunks: &[Vec<Choice>]) -> Vec<Choice> {
+    let mut choices = Vec::new();
+    for chunk in chunks {
+        choices.push(Choice::Boolean(true));
+        choices.extend(chunk.iter().cloned());
+    }
+    choices.push(Choice::Boolean(false));
+    choices
 }
 
 #[cfg(feature = "rust-core")]
