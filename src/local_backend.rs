@@ -80,6 +80,14 @@ fn integer_value(value: i128) -> Value {
     }
 }
 
+fn as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Float(value) => Some(*value),
+        Value::Integer(value) => Some(i128::from(*value) as f64),
+        _ => None,
+    }
+}
+
 static SMALLEST_POSITIVE_FLOAT: LazyLock<f64> = LazyLock::new(|| {
     let next = f64::from_bits(1);
     if next > 0.0 { next } else { f64::MIN_POSITIVE }
@@ -92,6 +100,7 @@ pub struct LocalBackend {
     next_collection_id: usize,
     collections: HashMap<String, CollectionState>,
     pools: Vec<PoolState>,
+    target_observations: HashMap<String, f64>,
     replay_choices: VecDeque<Choice>,
     recorded_choices: Vec<Choice>,
     spans: Vec<SpanRecord>,
@@ -112,6 +121,7 @@ impl LocalBackend {
             next_collection_id: 0,
             collections: HashMap::new(),
             pools: Vec::new(),
+            target_observations: HashMap::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
             spans: Vec::new(),
@@ -136,6 +146,7 @@ impl LocalBackend {
             next_collection_id: 0,
             collections: HashMap::new(),
             pools: Vec::new(),
+            target_observations: HashMap::new(),
             replay_choices: choices.into(),
             recorded_choices: Vec::new(),
             spans: Vec::new(),
@@ -156,6 +167,7 @@ impl LocalBackend {
             next_collection_id: 0,
             collections: HashMap::new(),
             pools: Vec::new(),
+            target_observations: HashMap::new(),
             replay_choices: VecDeque::new(),
             recorded_choices: Vec::new(),
             spans: Vec::new(),
@@ -196,6 +208,11 @@ impl LocalBackend {
 
     pub fn spans(&self) -> &[SpanRecord] {
         &self.spans
+    }
+
+    #[cfg(test)]
+    pub fn target_observations(&self) -> &HashMap<String, f64> {
+        &self.target_observations
     }
 
     pub fn handle_request(&mut self, request: &Value) -> Result<Value, LocalBackendError> {
@@ -284,6 +301,19 @@ impl LocalBackend {
                     .and_then(as_bool)
                     .unwrap_or(false);
                 self.stop_span(discard);
+                Ok(Value::Null)
+            }
+            "target" => {
+                let value = map_get(request, "value")
+                    .and_then(as_f64)
+                    .ok_or_else(|| {
+                        LocalBackendError::InvalidRequest("missing target value".to_owned())
+                    })?;
+                let label = map_get(request, "label")
+                    .and_then(as_text)
+                    .unwrap_or("")
+                    .to_owned();
+                self.target_observations.insert(label, value);
                 Ok(Value::Null)
             }
             "mark_complete" => Ok(Value::Null),
@@ -2523,5 +2553,26 @@ mod tests {
         assert_eq!(spans[1].parent, Some(0));
         assert_eq!(spans[1].children, vec![2]);
         assert_eq!(spans[2].label, labels::LIST_ELEMENT);
+    }
+
+    #[test]
+    fn local_backend_records_target_observations() {
+        let mut backend = LocalBackend::from_seed(0);
+
+        backend
+            .handle_request(&Value::Map(vec![
+                (
+                    Value::Text("command".to_owned()),
+                    Value::Text("target".to_owned()),
+                ),
+                (Value::Text("value".to_owned()), Value::Float(2.5)),
+                (
+                    Value::Text("label".to_owned()),
+                    Value::Text("score".to_owned()),
+                ),
+            ]))
+            .expect("target should succeed");
+
+        assert_eq!(backend.target_observations().get("score"), Some(&2.5));
     }
 }

@@ -250,6 +250,26 @@ impl TestCase {
         }
     }
 
+    /// Guide the test engine toward higher values of a numeric metric.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use hegel::generators as gs;
+    ///
+    /// #[hegel::test]
+    /// fn my_test(tc: hegel::TestCase) {
+    ///     let values: Vec<i32> = tc.draw(gs::vecs(gs::integers()));
+    ///     tc.target(values.len() as f64, "size");
+    /// }
+    /// ```
+    pub fn target(&self, value: f64, label: &str) {
+        let _ = self.send_request("target", &cbor_map! {
+            "value" => value,
+            "label" => label,
+        });
+    }
+
     pub(crate) fn child(&self, extra_indent: usize) -> Self {
         let local = self.local.borrow();
         TestCase {
