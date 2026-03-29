@@ -40,7 +40,9 @@ fn test_integers_are_often_small() {
 
 #[test]
 fn test_integers_are_often_small_but_not_that_small() {
-    find_any(gs::integers::<i64>(), |&x| (50..=255).contains(&x.abs()));
+    find_any(gs::integers::<i64>(), |&x| {
+        (50..=255).contains(&x.unsigned_abs())
+    });
 }
 
 #[test]

@@ -1608,19 +1608,23 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
     else {
         return None;
     };
-    let mut current_scalar = *scalar;
+    let mut current_scalar = i64::try_from(*scalar).ok()?;
     let mut current_values = values
         .iter()
         .map(|value| match value {
-            DataValue::Integer(value) => Some(*value),
+            DataValue::Integer(value) => i64::try_from(*value).ok(),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
 
     current_scalar = shrink_core_integer_observation(
         IntegerShrinkObservation {
-            min_value: scalar_min_value.unwrap_or(i64::MIN),
-            max_value: scalar_max_value.unwrap_or(i64::MAX),
+            min_value: scalar_min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
+            max_value: scalar_max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
             value: current_scalar,
         },
         |candidate| {
@@ -1638,12 +1642,12 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
                 seed,
                 vec![
                     DataValue::List(
-                        candidate_values
-                            .into_iter()
-                            .map(DataValue::Integer)
-                            .collect(),
+                            candidate_values
+                                .into_iter()
+                                .map(|value| DataValue::Integer(value.into()))
+                                .collect(),
                     ),
-                    DataValue::Integer(candidate),
+                    DataValue::Integer(candidate.into()),
                 ],
                 test_fn,
                 verbosity,
@@ -1652,7 +1656,7 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
         },
     );
     for value in &mut current_values {
-        if *value == *scalar {
+        if *value as i128 == *scalar {
             *value = current_scalar;
         }
     }
@@ -1660,8 +1664,12 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
     let current_values = shrink_core_integer_list_observation(
         current_values,
         *min_size,
-        min_value.unwrap_or(i64::MIN),
-        max_value.unwrap_or(i64::MAX),
+        min_value
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(i64::MIN),
+        max_value
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(i64::MAX),
         *unique,
         |candidate| {
             candidate.contains(&current_scalar)
@@ -1669,9 +1677,13 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
                     seed,
                     vec![
                         DataValue::List(
-                            candidate.iter().copied().map(DataValue::Integer).collect(),
+                            candidate
+                                .iter()
+                                .copied()
+                                .map(|value| DataValue::Integer(value.into()))
+                                .collect(),
                         ),
-                        DataValue::Integer(current_scalar),
+                        DataValue::Integer(current_scalar.into()),
                     ],
                     test_fn,
                     verbosity,
@@ -1684,10 +1696,10 @@ fn shrink_local_integer_containment_observation<F: FnMut(TestCase)>(
         ForcedLocalValue::IntegerList {
             values: current_values,
             min_size: *min_size,
-            element_min_value: *min_value,
-            element_max_value: *max_value,
+            element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
+            element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
         },
-        DataValue::Integer(current_scalar),
+        DataValue::Integer(current_scalar.into()),
     ))
 }
 
@@ -1720,21 +1732,29 @@ fn shrink_local_integer_pair_observation<F: FnMut(TestCase)>(
     };
 
     let shrunk = shrink_core_integer_pair_observation(
-        [*first, *second],
+        [i64::try_from(*first).ok()?, i64::try_from(*second).ok()?],
         [
-            first_min_value.unwrap_or(i64::MIN),
-            second_min_value.unwrap_or(i64::MIN),
+            first_min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
+            second_min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
         ],
         [
-            first_max_value.unwrap_or(i64::MAX),
-            second_max_value.unwrap_or(i64::MAX),
+            first_max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
+            second_max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
         ],
         |candidate| {
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(candidate[0]),
-                    DataValue::Integer(candidate[1]),
+                    DataValue::Integer(candidate[0].into()),
+                    DataValue::Integer(candidate[1].into()),
                 ],
                 test_fn,
                 verbosity,
@@ -1744,8 +1764,8 @@ fn shrink_local_integer_pair_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(shrunk[0]),
-        DataValue::Integer(shrunk[1]),
+        DataValue::Integer(shrunk[0].into()),
+        DataValue::Integer(shrunk[1].into()),
     ])
 }
 
@@ -1784,24 +1804,32 @@ fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
     let middle_bool = generate_simplest_value(middle_bool_schema).ok()?;
     let middle_integer = generate_simplest_value(middle_integer_schema).ok()?;
     let shrunk = shrink_core_integer_pair_observation(
-        [*first, *second],
+        [i64::try_from(*first).ok()?, i64::try_from(*second).ok()?],
         [
-            first_min_value.unwrap_or(i64::MIN),
-            second_min_value.unwrap_or(i64::MIN),
+            first_min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
+            second_min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
         ],
         [
-            first_max_value.unwrap_or(i64::MAX),
-            second_max_value.unwrap_or(i64::MAX),
+            first_max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
+            second_max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
         ],
         |candidate| {
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(candidate[0]),
+                    DataValue::Integer(candidate[0].into()),
                     middle_text.clone(),
                     middle_bool.clone(),
                     middle_integer.clone(),
-                    DataValue::Integer(candidate[1]),
+                    DataValue::Integer(candidate[1].into()),
                 ],
                 test_fn,
                 verbosity,
@@ -1811,11 +1839,11 @@ fn shrink_local_separated_integer_pair_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(shrunk[0]),
+        DataValue::Integer(shrunk[0].into()),
         middle_text,
         middle_bool,
         middle_integer,
-        DataValue::Integer(shrunk[1]),
+        DataValue::Integer(shrunk[1].into()),
     ])
 }
 
@@ -1844,8 +1872,14 @@ fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(candidate.len() as i64),
-                    DataValue::List(candidate.iter().copied().map(DataValue::Integer).collect()),
+                    DataValue::Integer(candidate.len() as i128),
+                    DataValue::List(
+                        candidate
+                            .iter()
+                            .copied()
+                            .map(|value| DataValue::Integer(value.into()))
+                            .collect(),
+                    ),
                 ],
                 test_fn,
                 verbosity,
@@ -1855,8 +1889,13 @@ fn shrink_local_flatmap_integer_list_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(shrunk.len() as i64),
-        DataValue::List(shrunk.into_iter().map(DataValue::Integer).collect()),
+        DataValue::Integer(shrunk.len() as i128),
+        DataValue::List(
+            shrunk
+                .into_iter()
+                .map(|value| DataValue::Integer(value.into()))
+                .collect(),
+        ),
     ])
 }
 
@@ -1882,7 +1921,7 @@ fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(candidate.len() as i64),
+                    DataValue::Integer(candidate.len() as i128),
                     DataValue::List(candidate.iter().copied().map(DataValue::Boolean).collect()),
                 ],
                 test_fn,
@@ -1893,7 +1932,7 @@ fn shrink_local_flatmap_boolean_list_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(shrunk.len() as i64),
+        DataValue::Integer(shrunk.len() as i128),
         DataValue::List(shrunk.into_iter().map(DataValue::Boolean).collect()),
     ])
 }
@@ -1924,13 +1963,17 @@ fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(observation.width as i64),
+                    DataValue::Integer(observation.width as i128),
                     DataValue::List(
                         candidate
                             .iter()
                             .map(|values| {
                                 DataValue::List(
-                                    values.iter().copied().map(DataValue::Integer).collect(),
+                                    values
+                                        .iter()
+                                        .copied()
+                                        .map(|value| DataValue::Integer(value.into()))
+                                        .collect(),
                                 )
                             })
                             .collect(),
@@ -1944,11 +1987,18 @@ fn shrink_local_flatmap_integer_list_list_observation<F: FnMut(TestCase)>(
     );
 
     Some(vec![
-        DataValue::Integer(observation.width as i64),
+        DataValue::Integer(observation.width as i128),
         DataValue::List(
             shrunk
                 .into_iter()
-                .map(|values| DataValue::List(values.into_iter().map(DataValue::Integer).collect()))
+                .map(|values| {
+                    DataValue::List(
+                        values
+                            .into_iter()
+                            .map(|value| DataValue::Integer(value.into()))
+                            .collect(),
+                    )
+                })
                 .collect(),
         ),
     ])
@@ -1997,15 +2047,19 @@ fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
 
     let current_value = shrink_core_integer_observation(
         IntegerShrinkObservation {
-            min_value: min_value.unwrap_or(i64::MIN),
-            max_value: max_value.unwrap_or(i64::MAX),
-            value: *value,
+            min_value: min_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MIN),
+            max_value: max_value
+                .and_then(|value| i64::try_from(value).ok())
+                .unwrap_or(i64::MAX),
+            value: i64::try_from(*value).ok()?,
         },
         |candidate| {
             local_forced_values_are_interesting(
                 seed,
                 vec![
-                    DataValue::Integer(candidate),
+                    DataValue::Integer(candidate.into()),
                     DataValue::List(vec![DataValue::Null; values.len()]),
                 ],
                 test_fn,
@@ -2020,9 +2074,9 @@ fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
     while low < high {
         let mid = low + ((high - low) / 2);
         if local_forced_values_are_interesting(
-            seed,
-            vec![
-                DataValue::Integer(current_value),
+                seed,
+                vec![
+                DataValue::Integer(current_value.into()),
                 DataValue::List(vec![DataValue::Null; mid]),
             ],
             test_fn,
@@ -2036,7 +2090,7 @@ fn shrink_local_integer_fill_const_list_observation<F: FnMut(TestCase)>(
     }
 
     Some(vec![
-        DataValue::Integer(current_value),
+        DataValue::Integer(current_value.into()),
         DataValue::List(vec![DataValue::Null; low]),
     ])
 }
@@ -2309,23 +2363,30 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             DataValue::Integer(value),
         ) => Some(LocalShrinkResult {
             forced_value: ForcedLocalValue::Integer {
-                value: shrink_core_integer_observation(
-                    IntegerShrinkObservation {
-                        min_value: min_value.unwrap_or(i64::MIN),
-                        max_value: max_value.unwrap_or(i64::MAX),
-                        value: *value,
-                    },
-                    |candidate| {
-                        local_integer_candidate_is_interesting(
-                            seed,
-                            replay_choices,
-                            candidate,
-                            test_fn,
-                            verbosity,
-                            got_interesting,
-                        )
-                    },
-                ),
+                value: i64::try_from(*value).ok().map_or(*value, |value| {
+                    shrink_core_integer_observation(
+                        IntegerShrinkObservation {
+                            min_value: min_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MIN),
+                            max_value: max_value
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(i64::MAX),
+                            value,
+                        },
+                        |candidate| {
+                            local_integer_candidate_is_interesting(
+                                seed,
+                                replay_choices,
+                                candidate,
+                                test_fn,
+                                verbosity,
+                                got_interesting,
+                            )
+                        },
+                    )
+                    .into()
+                }),
                 min_value: *min_value,
                 max_value: *max_value,
             },
@@ -2350,14 +2411,18 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             let tuple_min_values = elements
                 .iter()
                 .map(|element| match element {
-                    Schema::Integer { min_value, .. } => min_value.unwrap_or(i64::MIN),
+                    Schema::Integer { min_value, .. } => min_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MIN),
                     _ => unreachable!("guard already ensured integer tuple schema"),
                 })
                 .collect::<Vec<_>>();
             let tuple_max_values = elements
                 .iter()
                 .map(|element| match element {
-                    Schema::Integer { max_value, .. } => max_value.unwrap_or(i64::MAX),
+                    Schema::Integer { max_value, .. } => max_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MAX),
                     _ => unreachable!("guard already ensured integer tuple schema"),
                 })
                 .collect::<Vec<_>>();
@@ -2367,7 +2432,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     DataValue::Tuple(values) => values
                         .iter()
                         .map(|value| match value {
-                            DataValue::Integer(value) => Some(*value),
+                            DataValue::Integer(value) => i64::try_from(*value).ok(),
                             _ => None,
                         })
                         .collect::<Option<Vec<_>>>(),
@@ -2434,7 +2499,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     DataValue::List(values) => values
                         .iter()
                         .map(|value| match value {
-                            DataValue::Integer(value) => Some(*value),
+                            DataValue::Integer(value) => i64::try_from(*value).ok(),
                             _ => None,
                         })
                         .collect::<Option<Vec<_>>>(),
@@ -2446,8 +2511,12 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 integers,
                 *min_size,
                 *inner_min_size,
-                min_value.unwrap_or(i64::MIN),
-                max_value.unwrap_or(i64::MAX),
+                min_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MIN),
+                max_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX),
                 *inner_unique,
                 test_fn,
                 verbosity,
@@ -2458,8 +2527,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     values,
                     min_size: *min_size,
                     inner_min_size: *inner_min_size,
-                    inner_element_min_value: *min_value,
-                    inner_element_max_value: *max_value,
+                    inner_element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
+                    inner_element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
                     inner_unique: *inner_unique,
                 },
                 downgraded_primary_bytes: Vec::new(),
@@ -2493,7 +2562,9 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             let entries = values
                 .iter()
                 .map(|(key, value)| match (key, value) {
-                    (DataValue::Integer(key), DataValue::Integer(value)) => Some((*key, *value)),
+                    (DataValue::Integer(key), DataValue::Integer(value)) => {
+                        Some((i64::try_from(*key).ok()?, i64::try_from(*value).ok()?))
+                    }
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -2501,10 +2572,18 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 seed,
                 entries,
                 *min_size,
-                key_min_value.unwrap_or(i64::MIN),
-                key_max_value.unwrap_or(i64::MAX),
-                value_min_value.unwrap_or(i64::MIN),
-                value_max_value.unwrap_or(i64::MAX),
+                key_min_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MIN),
+                key_max_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX),
+                value_min_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MIN),
+                value_max_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX),
                 test_fn,
                 verbosity,
                 got_interesting,
@@ -2513,10 +2592,18 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 forced_value: ForcedLocalValue::IntegerDict {
                     values,
                     min_size: *min_size,
-                    key_min_value: key_min_value.unwrap_or(i64::MIN),
-                    key_max_value: key_max_value.unwrap_or(i64::MAX),
-                    value_min_value: value_min_value.unwrap_or(i64::MIN),
-                    value_max_value: value_max_value.unwrap_or(i64::MAX),
+                    key_min_value: key_min_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MIN),
+                    key_max_value: key_max_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MAX),
+                    value_min_value: value_min_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MIN),
+                    value_max_value: value_max_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MAX),
                 },
                 downgraded_primary_bytes: Vec::new(),
             })
@@ -2550,7 +2637,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 .iter()
                 .map(|(key, value)| match (key, value) {
                     (DataValue::Integer(key), DataValue::String(value)) => {
-                        Some((*key, value.clone()))
+                        Some((i64::try_from(*key).ok()?, value.clone()))
                     }
                     _ => None,
                 })
@@ -2559,8 +2646,12 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 seed,
                 entries,
                 *min_size,
-                key_min_value.unwrap_or(i64::MIN),
-                key_max_value.unwrap_or(i64::MAX),
+                key_min_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MIN),
+                key_max_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX),
                 *value_min_size,
                 test_fn,
                 verbosity,
@@ -2570,8 +2661,12 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 forced_value: ForcedLocalValue::IntegerStringDict {
                     values,
                     min_size: *min_size,
-                    key_min_value: key_min_value.unwrap_or(i64::MIN),
-                    key_max_value: key_max_value.unwrap_or(i64::MAX),
+                    key_min_value: key_min_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MIN),
+                    key_max_value: key_max_value
+                        .and_then(|value| i64::try_from(value).ok())
+                        .unwrap_or(i64::MAX),
                     value_min_size: *value_min_size,
                 },
                 downgraded_primary_bytes: Vec::new(),
@@ -2772,7 +2867,7 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             let integers = values
                 .iter()
                 .map(|value| match value {
-                    DataValue::Integer(value) => Some(*value),
+                    DataValue::Integer(value) => i64::try_from(*value).ok(),
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -2780,8 +2875,12 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 seed,
                 integers,
                 *min_size,
-                min_value.unwrap_or(i64::MIN),
-                max_value.unwrap_or(i64::MAX),
+                min_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MIN),
+                max_value
+                    .and_then(|value| i64::try_from(value).ok())
+                    .unwrap_or(i64::MAX),
                 *unique,
                 test_fn,
                 verbosity,
@@ -2791,8 +2890,8 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                 forced_value: ForcedLocalValue::IntegerList {
                     values,
                     min_size: *min_size,
-                    element_min_value: *min_value,
-                    element_max_value: *max_value,
+                    element_min_value: min_value.and_then(|value| i64::try_from(value).ok()),
+                    element_max_value: max_value.and_then(|value| i64::try_from(value).ok()),
                 },
                 downgraded_primary_bytes: Vec::new(),
             })
@@ -3529,7 +3628,7 @@ fn local_integer_candidate_is_interesting<F: FnMut(TestCase)>(
         seed,
         replay_choices,
         &ForcedLocalValue::Integer {
-            value: candidate,
+            value: candidate.into(),
             min_value: None,
             max_value: None,
         },

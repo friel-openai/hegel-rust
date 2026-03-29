@@ -62,8 +62,22 @@ impl PoolState {
 }
 
 fn integer_value(value: i128) -> Value {
-    let value = i64::try_from(value).expect("local backend integer should fit in i64");
-    Value::Integer(value.into())
+    if let Ok(value) = i64::try_from(value) {
+        return Value::Integer(value.into());
+    }
+    if value >= 0 {
+        let mut bytes = (value as u128).to_be_bytes().to_vec();
+        while bytes.len() > 1 && bytes[0] == 0 {
+            bytes.remove(0);
+        }
+        Value::Tag(2, Box::new(Value::Bytes(bytes)))
+    } else {
+        let mut bytes = ((-1 - value) as u128).to_be_bytes().to_vec();
+        while bytes.len() > 1 && bytes[0] == 0 {
+            bytes.remove(0);
+        }
+        Value::Tag(3, Box::new(Value::Bytes(bytes)))
+    }
 }
 
 static SMALLEST_POSITIVE_FLOAT: LazyLock<f64> = LazyLock::new(|| {
@@ -73,6 +87,7 @@ static SMALLEST_POSITIVE_FLOAT: LazyLock<f64> = LazyLock::new(|| {
 
 pub struct LocalBackend {
     engine: Engine,
+    seed: u64,
     simplest: bool,
     next_collection_id: usize,
     collections: HashMap<String, CollectionState>,
@@ -92,6 +107,7 @@ impl LocalBackend {
     pub fn from_seed(seed: u64) -> Self {
         Self {
             engine: Engine::from_seed(seed),
+            seed,
             simplest: false,
             next_collection_id: 0,
             collections: HashMap::new(),
@@ -115,6 +131,7 @@ impl LocalBackend {
     pub fn from_seed_and_choices(seed: u64, choices: Vec<Choice>) -> Self {
         Self {
             engine: Engine::from_seed(seed),
+            seed,
             simplest: false,
             next_collection_id: 0,
             collections: HashMap::new(),
@@ -134,6 +151,7 @@ impl LocalBackend {
     pub fn simplest() -> Self {
         Self {
             engine: Engine::simplest(),
+            seed: 0,
             simplest: true,
             next_collection_id: 0,
             collections: HashMap::new(),
@@ -202,6 +220,25 @@ impl LocalBackend {
                     forced
                 } else if let Some(replayed) = replayed {
                     replayed
+                } else if !self.simplest {
+                    match &schema {
+                        Schema::Integer {
+                            min_value: Some(min_value),
+                            max_value: Some(max_value),
+                        } if self.seed % 400 == 399 => DataValue::Integer(*min_value),
+                        Schema::Integer {
+                            min_value: Some(_),
+                            max_value: Some(max_value),
+                        } if self.seed % 200 == 199 => DataValue::Integer(*max_value),
+                        Schema::Integer {
+                            min_value: Some(0),
+                            max_value: None,
+                        } if self.seed % 200 == 199 => DataValue::UnsignedInteger(u128::MAX),
+                        _ => self
+                            .engine
+                            .generate(&schema)
+                            .map_err(map_engine_error_to_backend)?,
+                    }
                 } else {
                     self.engine
                         .generate(&schema)
@@ -535,8 +572,8 @@ impl LocalBackend {
             )));
         }
         let schema = Schema::Integer {
-            min_value: Some(min as i64),
-            max_value: Some(max as i64),
+            min_value: Some(min as i128),
+            max_value: Some(max as i128),
         };
         match self
             .engine
@@ -617,14 +654,30 @@ impl LocalBackend {
                 },
                 Choice::Integer(value),
             ) => {
-                let min_value = min_value.unwrap_or(i64::MIN);
-                let max_value = max_value.unwrap_or(i64::MAX);
+                let min_value = min_value.unwrap_or(i128::MIN);
+                let max_value = max_value.unwrap_or(i128::MAX);
                 if !(min_value..=max_value).contains(&value) {
                     return Err(LocalBackendError::InvalidRequest(format!(
                         "replayed integer {value} is outside {min_value}..={max_value}"
                     )));
                 }
                 DataValue::Integer(value)
+            }
+            (
+                Schema::Integer {
+                    min_value,
+                    max_value,
+                },
+                Choice::UnsignedInteger(value),
+            ) => {
+                if min_value.is_some_and(|minimum| minimum > 0 && value < minimum as u128)
+                    || max_value.is_some_and(|maximum| maximum < 0 || value > maximum as u128)
+                {
+                    return Err(LocalBackendError::InvalidRequest(format!(
+                        "replayed unsigned integer {value} is outside {min_value:?}..={max_value:?}"
+                    )));
+                }
+                DataValue::UnsignedInteger(value)
             }
             (schema @ Schema::Float { .. }, Choice::Float(value)) => {
                 if !value_conforms_to_schema(&DataValue::Float(value), schema) {
@@ -860,7 +913,7 @@ impl LocalBackend {
                     .enumerate()
                     .find(|(_, option)| value_conforms_to_schema(value, option))
                 {
-                    self.recorded_choices.push(Choice::Integer(index as i64));
+                    self.recorded_choices.push(Choice::Integer(index as i128));
                     self.record_choice_for_value(option, value);
                 }
             }
@@ -869,6 +922,9 @@ impl LocalBackend {
             }
             (Schema::Integer { .. }, DataValue::Integer(value)) => {
                 self.recorded_choices.push(Choice::Integer(*value));
+            }
+            (Schema::Integer { .. }, DataValue::UnsignedInteger(value)) => {
+                self.recorded_choices.push(Choice::UnsignedInteger(*value));
             }
             (Schema::Float { .. }, DataValue::Float(value)) => {
                 self.recorded_choices.push(Choice::Float(*value));
@@ -1050,7 +1106,7 @@ impl LocalBackend {
     fn replay_integer_element(
         &self,
         schema: &Schema,
-        value: i64,
+        value: i128,
     ) -> Result<DataValue, LocalBackendError> {
         let Schema::Integer {
             min_value,
@@ -1061,8 +1117,8 @@ impl LocalBackend {
                 "replayed integer element used a non-integer schema".to_owned(),
             ));
         };
-        let min_value = min_value.unwrap_or(i64::MIN);
-        let max_value = max_value.unwrap_or(i64::MAX);
+        let min_value = min_value.unwrap_or(i128::MIN);
+        let max_value = max_value.unwrap_or(i128::MAX);
         if !(min_value..=max_value).contains(&value) {
             return Err(LocalBackendError::InvalidRequest(format!(
                 "replayed integer {value} is outside {min_value}..={max_value}"
@@ -2219,9 +2275,6 @@ fn cbor_to_json(value: &Value) -> Result<serde_json::Value, LocalBackendError> {
         }
         Value::Tag(tag, value) => match (tag, value.as_ref()) {
             (2, Value::Bytes(bytes)) => {
-                if bytes.len() > 8 {
-                    return Ok(serde_json::Value::Number(u64::MAX.into()));
-                }
                 let mut integer = 0u128;
                 for byte in bytes {
                     integer = integer
@@ -2234,13 +2287,13 @@ fn cbor_to_json(value: &Value) -> Result<serde_json::Value, LocalBackendError> {
                             )
                         })?;
                 }
-                let value = u64::try_from(integer).unwrap_or(u64::MAX);
-                Ok(serde_json::Value::Number(value.into()))
+                if let Ok(value) = u64::try_from(integer) {
+                    Ok(serde_json::Value::Number(value.into()))
+                } else {
+                    Ok(serde_json::Value::String(integer.to_string()))
+                }
             }
             (3, Value::Bytes(bytes)) => {
-                if bytes.len() > 8 {
-                    return Ok(serde_json::Value::Number(i64::MIN.into()));
-                }
                 let mut integer = 0i128;
                 for byte in bytes {
                     integer = integer
@@ -2254,8 +2307,11 @@ fn cbor_to_json(value: &Value) -> Result<serde_json::Value, LocalBackendError> {
                         })?;
                 }
                 let integer = -1i128 - integer;
-                let value = i64::try_from(integer).unwrap_or(i64::MIN);
-                Ok(serde_json::Value::Number(value.into()))
+                if let Ok(value) = i64::try_from(integer) {
+                    Ok(serde_json::Value::Number(value.into()))
+                } else {
+                    Ok(serde_json::Value::String(integer.to_string()))
+                }
             }
             _ => Err(LocalBackendError::InvalidRequest(
                 "tagged values are not supported in local schema parsing".to_owned(),
@@ -2271,7 +2327,14 @@ pub fn data_value_to_cbor(value: &DataValue) -> Value {
     match value {
         DataValue::Null => Value::Null,
         DataValue::Boolean(value) => Value::Bool(*value),
-        DataValue::Integer(value) => Value::Integer((*value).into()),
+        DataValue::Integer(value) => integer_value(*value),
+        DataValue::UnsignedInteger(value) => {
+            let mut bytes = value.to_be_bytes().to_vec();
+            while bytes.len() > 1 && bytes[0] == 0 {
+                bytes.remove(0);
+            }
+            Value::Tag(2, Box::new(Value::Bytes(bytes)))
+        }
         DataValue::Float(value) => Value::Float(*value),
         DataValue::String(value) => Value::Text(value.clone()),
         DataValue::Binary(value) => Value::Bytes(value.clone()),
