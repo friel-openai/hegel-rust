@@ -1174,13 +1174,11 @@ where
             std::collections::HashMap::new();
         for plan in final_plans {
             let mut plan = plan;
-            if self.settings.derandomize && plan.forced_value.is_none() {
-                let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&plan)));
-                if !plan.forced_prefix_values.is_empty() {
-                    backend
-                        .borrow_mut()
-                        .force_values(plan.forced_prefix_values.clone());
-                }
+                if self.settings.derandomize && plan.forced_value.is_none() {
+                    let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&plan)));
+                    if let Some(forced_values) = plan.forced_values() {
+                        backend.borrow_mut().force_values(forced_values);
+                    }
                 let tc_result = run_test_case(
                     TestBackend::Local {
                         backend: Rc::clone(&backend),
@@ -1351,14 +1349,8 @@ where
                 }
             }
             let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&plan)));
-            if let Some(value) = &plan.forced_value {
-                let mut forced_values = vec![value.clone().into_data_value()];
-                forced_values.extend(plan.forced_prefix_values.iter().skip(1).cloned());
+            if let Some(forced_values) = plan.forced_values() {
                 backend.borrow_mut().force_values(forced_values);
-            } else if !plan.forced_prefix_values.is_empty() {
-                backend
-                    .borrow_mut()
-                    .force_values(plan.forced_prefix_values.clone());
             }
             let tc_result = run_test_case(
                 TestBackend::Local {
@@ -1402,14 +1394,8 @@ where
 
         if let Some(best_plan) = final_replay_tracker.best_display_plan() {
             let backend = Rc::new(RefCell::new(local_backend_from_replay_plan(&best_plan)));
-            if let Some(value) = &best_plan.forced_value {
-                let mut forced_values = vec![value.clone().into_data_value()];
-                forced_values.extend(best_plan.forced_prefix_values.iter().skip(1).cloned());
+            if let Some(forced_values) = best_plan.forced_values() {
                 backend.borrow_mut().force_values(forced_values);
-            } else if !best_plan.forced_prefix_values.is_empty() {
-                backend
-                    .borrow_mut()
-                    .force_values(best_plan.forced_prefix_values.clone());
             }
             let tc_result = run_test_case(
                 TestBackend::Local {
