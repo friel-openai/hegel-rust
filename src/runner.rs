@@ -46,12 +46,11 @@ use hegel_core::shrink::{
     float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
-    shrink_boolean_dict_forced_value,
-    shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
-    shrink_boolean_list_observation as shrink_core_boolean_list_observation,
+    shrink_binary_forced_value, shrink_boolean_dict_forced_value,
+    shrink_boolean_list_forced_value, shrink_boolean_list_list_forced_value,
     shrink_boolean_forced_value,
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
-    shrink_float_list_observation as shrink_core_float_list_observation,
+    shrink_float_list_forced_value,
     shrink_integer_dict_forced_value,
     shrink_integer_list_list_forced_value,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
@@ -59,7 +58,8 @@ use hegel_core::shrink::{
     shrink_integer_forced_value,
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
-    shrink_integer_string_dict_forced_value,
+    shrink_integer_string_dict_forced_value, shrink_string_forced_value,
+    shrink_string_list_forced_value,
     shrink_integer_tuple_list_forced_value,
 };
 #[cfg(feature = "rust-core")]
@@ -2602,23 +2602,27 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_boolean_list_list_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_boolean_list_list_forced_value(
                 booleans,
                 *min_size,
                 *inner_min_size,
                 *inner_max_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::BooleanListList {
-                    values,
-                    min_size: *min_size,
-                    inner_min_size: *inner_min_size,
-                    inner_max_size: *inner_max_size,
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::BooleanListList {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            inner_min_size: *inner_min_size,
+                            inner_max_size: *inner_max_size,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2638,21 +2642,25 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_boolean_list_observation(
-                seed,
+            Some(LocalShrinkResult {
+                forced_value: shrink_boolean_list_forced_value(
                 booleans,
                 *min_size,
                 *max_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::BooleanList {
-                    values,
-                    min_size: *min_size,
-                    max_size: *max_size,
+                |candidate| {
+                    local_value_candidate_is_interesting(
+                        seed,
+                        &ForcedLocalValue::BooleanList {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            max_size: *max_size,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+            ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2682,28 +2690,34 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_float_list_observation(
-                seed,
+            let (forced_value, downgraded_primary_bytes) = shrink_float_list_forced_value(
                 floats,
-                initial_primary_bytes,
+                initial_primary_bytes.to_vec(),
                 *min_size,
                 *min_value,
                 *max_value,
                 *allow_nan,
                 *allow_infinity,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|(values, downgraded_primary_bytes)| LocalShrinkResult {
-                forced_value: ForcedLocalValue::FloatList {
-                    values,
-                    min_size: *min_size,
-                    element_min_value: *min_value,
-                    element_max_value: *max_value,
-                    allow_nan: *allow_nan,
-                    allow_infinity: *allow_infinity,
+                |candidate| {
+                    local_value_candidate_bytes_if_interesting(
+                        seed,
+                        &ForcedLocalValue::FloatList {
+                            values: candidate.to_vec(),
+                            min_size: *min_size,
+                            element_min_value: *min_value,
+                            element_max_value: *max_value,
+                            allow_nan: *allow_nan,
+                            allow_infinity: *allow_infinity,
+                        },
+                        test_fn,
+                        verbosity,
+                        got_interesting,
+                    )
                 },
+                |event, values, bytes| append_local_float_list_trace(event, values, bytes),
+            );
+            Some(LocalShrinkResult {
+                forced_value,
                 downgraded_primary_bytes,
             })
         }
@@ -2756,40 +2770,48 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             })
         }
         (Schema::Binary { min_size, max_size }, DataValue::Binary(value)) => {
-            shrink_binary_observation(
-                seed,
-                value.clone(),
-                *min_size,
-                *max_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|value| LocalShrinkResult {
-                forced_value: ForcedLocalValue::Binary {
-                    value,
-                    min_size: *min_size,
-                    max_size: *max_size,
-                },
+            Some(LocalShrinkResult {
+                forced_value: shrink_binary_forced_value(
+                    value.clone(),
+                    *min_size,
+                    *max_size,
+                    |candidate| {
+                        local_value_candidate_is_interesting(
+                            seed,
+                            &ForcedLocalValue::Binary {
+                                value: candidate.to_vec(),
+                                min_size: *min_size,
+                                max_size: *max_size,
+                            },
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
         (Schema::String { min_size, max_size }, DataValue::String(value)) => {
-            shrink_string_observation(
-                seed,
-                value.clone(),
-                *min_size,
-                *max_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|value| LocalShrinkResult {
-                forced_value: ForcedLocalValue::String {
-                    value,
-                    min_size: *min_size,
-                    max_size: *max_size,
-                },
+            Some(LocalShrinkResult {
+                forced_value: shrink_string_forced_value(
+                    value.clone(),
+                    *min_size,
+                    *max_size,
+                    |candidate| {
+                        local_value_candidate_is_interesting(
+                            seed,
+                            &ForcedLocalValue::String {
+                                value: candidate.to_owned(),
+                                min_size: *min_size,
+                                max_size: *max_size,
+                            },
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2816,23 +2838,27 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            shrink_string_list_observation(
-                seed,
-                strings,
-                *min_size,
-                *element_min_size,
-                *element_max_size,
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-            .map(|values| LocalShrinkResult {
-                forced_value: ForcedLocalValue::StringList {
-                    values,
-                    min_size: *min_size,
-                    element_min_size: *element_min_size,
-                    element_max_size: *element_max_size,
-                },
+            Some(LocalShrinkResult {
+                forced_value: shrink_string_list_forced_value(
+                    strings,
+                    *min_size,
+                    *element_min_size,
+                    *element_max_size,
+                    |candidate| {
+                        local_value_candidate_is_interesting(
+                            seed,
+                            &ForcedLocalValue::StringList {
+                                values: candidate.to_vec(),
+                                min_size: *min_size,
+                                element_min_size: *element_min_size,
+                                element_max_size: *element_max_size,
+                            },
+                            test_fn,
+                            verbosity,
+                            got_interesting,
+                        )
+                    },
+                ),
                 downgraded_primary_bytes: Vec::new(),
             })
         }
@@ -2930,336 +2956,6 @@ fn local_float_candidate_is_valid(
     }
     (min_value.unwrap_or(f64::NEG_INFINITY)..=max_value.unwrap_or(f64::INFINITY))
         .contains(&candidate)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_boolean_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<bool>,
-    min_size: usize,
-    max_size: Option<usize>,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<bool>> {
-    Some(shrink_core_boolean_list_observation(
-        current,
-        min_size,
-        |candidate| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::BooleanList {
-                    values: candidate.to_vec(),
-                    min_size,
-                    max_size,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_boolean_list_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<Vec<bool>>,
-    min_size: usize,
-    inner_min_size: usize,
-    inner_max_size: Option<usize>,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<Vec<bool>>> {
-    Some(shrink_core_boolean_list_list_observation(
-        current,
-        min_size,
-        inner_min_size,
-        |candidate: &[Vec<bool>]| {
-            local_value_candidate_is_interesting(
-                seed,
-                &ForcedLocalValue::BooleanListList {
-                    values: candidate.to_vec(),
-                    min_size,
-                    inner_min_size,
-                    inner_max_size,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-    ))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_float_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: Vec<f64>,
-    initial_primary_bytes: &[u8],
-    min_size: usize,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-    allow_nan: bool,
-    allow_infinity: bool,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<(Vec<f64>, Vec<Vec<u8>>)> {
-    let (current, _current_primary_bytes) = shrink_core_float_list_observation(
-        current,
-        initial_primary_bytes.to_vec(),
-        min_size,
-        min_value,
-        max_value,
-        allow_nan,
-        allow_infinity,
-        |candidate| {
-            local_value_candidate_bytes_if_interesting(
-                seed,
-                &ForcedLocalValue::FloatList {
-                    values: candidate.to_vec(),
-                    min_size,
-                    element_min_value: min_value,
-                    element_max_value: max_value,
-                    allow_nan,
-                    allow_infinity,
-                },
-                test_fn,
-                verbosity,
-                got_interesting,
-            )
-        },
-        |event, values, bytes| append_local_float_list_trace(event, values, bytes),
-    );
-
-    Some((current, Vec::new()))
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_string_list_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    mut current: Vec<String>,
-    min_size: usize,
-    element_min_size: usize,
-    element_max_size: Option<usize>,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<String>> {
-    while current.len() > min_size {
-        let candidate = current[..current.len() - 1].to_vec();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::StringList {
-                values: candidate.clone(),
-                min_size,
-                element_min_size,
-                element_max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current = candidate;
-        } else {
-            break;
-        }
-    }
-
-    for index in 0..current.len() {
-        current[index] = shrink_string_at_list_index(
-            seed,
-            &current,
-            min_size,
-            element_min_size,
-            element_max_size,
-            index,
-            test_fn,
-            verbosity,
-            got_interesting,
-        )?;
-    }
-
-    Some(current)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_string_at_list_index<F: FnMut(TestCase)>(
-    seed: u64,
-    current: &[String],
-    min_size: usize,
-    element_min_size: usize,
-    element_max_size: Option<usize>,
-    index: usize,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<String> {
-    let mut best = current[index].clone();
-    let mut best_chars: Vec<char> = best.chars().collect();
-
-    while best_chars.len() > element_min_size {
-        let candidate_chars = &best_chars[..best_chars.len() - 1];
-        let candidate: String = candidate_chars.iter().collect();
-        let mut probe = current.to_vec();
-        probe[index] = candidate.clone();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::StringList {
-                values: probe,
-                min_size,
-                element_min_size,
-                element_max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            best = candidate;
-            best_chars = candidate_chars.to_vec();
-        } else {
-            break;
-        }
-    }
-
-    for char_index in 0..best_chars.len() {
-        if best_chars[char_index] == '0' {
-            continue;
-        }
-        let mut candidate_chars = best_chars.clone();
-        candidate_chars[char_index] = '0';
-        let candidate: String = candidate_chars.iter().collect();
-        let mut probe = current.to_vec();
-        probe[index] = candidate.clone();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::StringList {
-                values: probe,
-                min_size,
-                element_min_size,
-                element_max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            best = candidate;
-            best_chars = candidate_chars;
-        }
-    }
-
-    Some(best)
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_string_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    current: String,
-    min_size: usize,
-    max_size: Option<usize>,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<String> {
-    let mut current_chars: Vec<char> = current.chars().collect();
-
-    while current_chars.len() > min_size {
-        let candidate: String = current_chars[..current_chars.len() - 1].iter().collect();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::String {
-                value: candidate.clone(),
-                min_size,
-                max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current_chars.pop();
-        } else {
-            break;
-        }
-    }
-
-    for index in 0..current_chars.len() {
-        if current_chars[index] == '0' {
-            continue;
-        }
-        let mut candidate_chars = current_chars.clone();
-        candidate_chars[index] = '0';
-        let candidate: String = candidate_chars.iter().collect();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::String {
-                value: candidate,
-                min_size,
-                max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current_chars[index] = '0';
-        }
-    }
-
-    Some(current_chars.into_iter().collect())
-}
-
-#[cfg(feature = "rust-core")]
-fn shrink_binary_observation<F: FnMut(TestCase)>(
-    seed: u64,
-    mut current: Vec<u8>,
-    min_size: usize,
-    max_size: Option<usize>,
-    test_fn: &mut F,
-    verbosity: Verbosity,
-    got_interesting: &Arc<AtomicBool>,
-) -> Option<Vec<u8>> {
-    while current.len() > min_size {
-        let candidate = current[..current.len() - 1].to_vec();
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::Binary {
-                value: candidate.clone(),
-                min_size,
-                max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current = candidate;
-        } else {
-            break;
-        }
-    }
-
-    for index in 0..current.len() {
-        if current[index] == 0 {
-            continue;
-        }
-        let mut candidate = current.clone();
-        candidate[index] = 0;
-        if local_value_candidate_is_interesting(
-            seed,
-            &ForcedLocalValue::Binary {
-                value: candidate.clone(),
-                min_size,
-                max_size,
-            },
-            test_fn,
-            verbosity,
-            got_interesting,
-        ) {
-            current = candidate;
-        }
-    }
-
-    Some(current)
 }
 
 #[cfg(feature = "rust-core")]
@@ -3825,28 +3521,45 @@ mod tests {
         )
         .expect("expected initial float-list witness to be replayable");
 
-        let result = shrink_float_list_observation(
-            0,
+        let (result, downgraded_primary_bytes) = shrink_float_list_forced_value(
             vec![210_798.0, 0.0],
-            &initial_primary_bytes,
+            initial_primary_bytes,
             2,
             None,
             None,
             true,
             true,
-            &mut test_fn,
-            Verbosity::Quiet,
-            &got_interesting,
-        )
-        .expect("expected shrink result");
-
-        assert_eq!(result.0.len(), 2);
-        assert_eq!(result.0.iter().filter(|&&value| value == 0.0).count(), 1);
-        assert!(
-            result.0.contains(&1.0),
-            "expected shrink result to contain 1.0, got {:?}",
-            result.0
+            |candidate| {
+                local_value_candidate_bytes_if_interesting(
+                    0,
+                    &ForcedLocalValue::FloatList {
+                        values: candidate.to_vec(),
+                        min_size: 2,
+                        element_min_value: None,
+                        element_max_value: None,
+                        allow_nan: true,
+                        allow_infinity: true,
+                    },
+                    &mut test_fn,
+                    Verbosity::Quiet,
+                    &got_interesting,
+                )
+            },
+            |event, values, bytes| append_local_float_list_trace(event, values, bytes),
         );
+
+        let ForcedLocalValue::FloatList { values, .. } = result else {
+            panic!("expected float-list forced value");
+        };
+
+        assert_eq!(values.len(), 2);
+        assert_eq!(values.iter().filter(|&&value| value == 0.0).count(), 1);
+        assert!(
+            values.contains(&1.0),
+            "expected shrink result to contain 1.0, got {:?}",
+            values
+        );
+        assert!(downgraded_primary_bytes.is_empty());
     }
 
     #[test]
@@ -3870,24 +3583,40 @@ mod tests {
         )
         .expect("expected bounded float-list witness to be replayable");
 
-        let result = shrink_float_list_observation(
-            0,
+        let (result, downgraded_primary_bytes) = shrink_float_list_forced_value(
             vec![0.797_419_994_097_881_7, 0.574_610_631_420_536_7],
-            &initial_primary_bytes,
+            initial_primary_bytes,
             2,
             Some(0.0),
             Some(1.0),
             false,
             false,
-            &mut test_fn,
-            Verbosity::Quiet,
-            &got_interesting,
-        )
-        .expect("expected shrink result");
+            |candidate| {
+                local_value_candidate_bytes_if_interesting(
+                    0,
+                    &ForcedLocalValue::FloatList {
+                        values: candidate.to_vec(),
+                        min_size: 2,
+                        element_min_value: Some(0.0),
+                        element_max_value: Some(1.0),
+                        allow_nan: false,
+                        allow_infinity: false,
+                    },
+                    &mut test_fn,
+                    Verbosity::Quiet,
+                    &got_interesting,
+                )
+            },
+            |event, values, bytes| append_local_float_list_trace(event, values, bytes),
+        );
 
-        assert_eq!(result.0, vec![0.0, 1.0]);
+        let ForcedLocalValue::FloatList { values, .. } = result else {
+            panic!("expected float-list forced value");
+        };
+
+        assert_eq!(values, vec![0.0, 1.0]);
         assert!(
-            result.1.is_empty(),
+            downgraded_primary_bytes.is_empty(),
             "expected bounded float-list shrinker to leave demotion timing to the engine-level save step"
         );
     }
