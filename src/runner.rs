@@ -43,18 +43,19 @@ use hegel_core::shrink::{
     ReplayPlan as LocalReplayPlan, composite_mixed_list_choices,
     flatmap_boolean_list_observation, flatmap_integer_list_list_observation, float_choice_index,
     flatmap_integer_list_observation, has_child_span_with_label, integer_shrink_candidates,
-    positive_float_as_integer_ratio, preferred_float_candidates,
+    float_forced_value, positive_float_as_integer_ratio, preferred_float_candidates,
     probe_composite_mixed_list_replay_choices, probe_integer_containment_mutation_plan,
     probe_mixed_list_replay_choices, probe_one_of_replay_choices, select_best_replay_plans,
     shrink_boolean_dict_observation as shrink_core_boolean_dict_observation,
     shrink_boolean_list_list_observation as shrink_core_boolean_list_list_observation,
     shrink_boolean_list_observation as shrink_core_boolean_list_observation,
-    shrink_boolean_observation as shrink_core_boolean_observation,
+    shrink_boolean_forced_value,
     shrink_dependent_boolean_list_observation as shrink_core_dependent_boolean_list_observation,
     shrink_float_list_observation as shrink_core_float_list_observation,
     shrink_integer_dict_observation as shrink_core_integer_dict_observation,
     shrink_integer_list_list_observation as shrink_core_integer_list_list_observation,
     shrink_integer_list_observation as shrink_core_integer_list_observation,
+    shrink_integer_forced_value,
     shrink_integer_observation as shrink_core_integer_observation,
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
@@ -2185,18 +2186,17 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
             got_interesting,
         )
         .map(|value| LocalShrinkResult {
-            forced_value: ForcedLocalValue::Float {
+            forced_value: float_forced_value(
                 value,
-                min_value: *min_value,
-                max_value: *max_value,
-                allow_nan: *allow_nan,
-                allow_infinity: *allow_infinity,
-            },
+                *min_value,
+                *max_value,
+                *allow_nan,
+                *allow_infinity,
+            ),
             downgraded_primary_bytes: Vec::new(),
         }),
         (Schema::Boolean { .. }, DataValue::Boolean(value)) => Some(LocalShrinkResult {
-            forced_value: ForcedLocalValue::Boolean {
-                value: shrink_core_boolean_observation(*value, |candidate| {
+            forced_value: shrink_boolean_forced_value(*value, |candidate| {
                     local_boolean_candidate_is_interesting(
                         seed,
                         replay_choices,
@@ -2206,44 +2206,30 @@ fn shrink_local_observation<F: FnMut(TestCase)>(
                         got_interesting,
                     )
                 }),
-            },
             downgraded_primary_bytes: Vec::new(),
         }),
         (
             Schema::Integer {
                 min_value,
-                max_value,
+            max_value,
             },
             DataValue::Integer(value),
         ) => Some(LocalShrinkResult {
-            forced_value: ForcedLocalValue::Integer {
-                value: i64::try_from(*value).ok().map_or(*value, |value| {
-                    shrink_core_integer_observation(
-                        IntegerShrinkObservation {
-                            min_value: min_value
-                                .and_then(|value| i64::try_from(value).ok())
-                                .unwrap_or(i64::MIN),
-                            max_value: max_value
-                                .and_then(|value| i64::try_from(value).ok())
-                                .unwrap_or(i64::MAX),
-                            value,
-                        },
-                        |candidate| {
-                            local_integer_candidate_is_interesting(
-                                seed,
-                                replay_choices,
-                                candidate,
-                                test_fn,
-                                verbosity,
-                                got_interesting,
-                            )
-                        },
+            forced_value: shrink_integer_forced_value(
+                *value,
+                *min_value,
+                *max_value,
+                |candidate| {
+                    local_integer_candidate_is_interesting(
+                        seed,
+                        replay_choices,
+                        candidate,
+                        test_fn,
+                        verbosity,
+                        got_interesting,
                     )
-                    .into()
-                }),
-                min_value: *min_value,
-                max_value: *max_value,
-            },
+                },
+            ),
             downgraded_primary_bytes: Vec::new(),
         }),
         (
