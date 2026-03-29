@@ -47,6 +47,7 @@ use hegel_core::shrink::{
     shrink_integer_pair_observation as shrink_core_integer_pair_observation,
     shrink_integer_string_dict_observation as shrink_core_integer_string_dict_observation,
     shrink_integer_tuple_list_observation as shrink_core_integer_tuple_list_observation,
+    shrink_list_observation as shrink_core_list_observation,
 };
 #[cfg(feature = "rust-core")]
 use std::cmp::Ordering as CmpOrdering;
@@ -1234,6 +1235,21 @@ where
                         plan.forced_value = None;
                     } else if let Some(replay_choices) =
                         observed_values.first().and_then(|(schema, value)| {
+                            shrink_local_mixed_list_observation(
+                                plan.seed.unwrap_or(0),
+                                schema,
+                                value,
+                                &mut test_fn,
+                                verbosity,
+                                &got_interesting,
+                            )
+                        })
+                    {
+                        plan.replay_choices = Some(replay_choices);
+                        plan.forced_prefix_values = Vec::new();
+                        plan.forced_value = None;
+                    } else if let Some(replay_choices) =
+                        observed_values.first().and_then(|(schema, value)| {
                             shrink_local_one_of_observation(
                                 plan.seed.unwrap_or(0),
                                 schema,
@@ -1770,6 +1786,56 @@ fn shrink_local_one_of_observation<F: FnMut(TestCase)>(
     }
 
     None
+}
+
+#[cfg(feature = "rust-core")]
+fn shrink_local_mixed_list_observation<F: FnMut(TestCase)>(
+    seed: u64,
+    schema: &Schema,
+    value: &DataValue,
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Choice>> {
+    let (
+        Schema::List {
+            elements,
+            min_size,
+            ..
+        },
+        DataValue::List(values),
+    ) = (schema, value)
+    else {
+        return None;
+    };
+    let Schema::OneOf { .. } = elements.as_ref() else {
+        return None;
+    };
+    let simplest_element = generate_simplest_value(elements).ok()?;
+
+    let shrunk = shrink_core_list_observation(
+        values.clone(),
+        *min_size,
+        |_| simplest_element.clone(),
+        |candidate| {
+            local_mixed_list_candidate_choices_if_interesting(
+                seed,
+                candidate,
+                test_fn,
+                verbosity,
+                got_interesting,
+            )
+            .is_some()
+        },
+    );
+
+    local_mixed_list_candidate_choices_if_interesting(
+        seed,
+        &shrunk,
+        test_fn,
+        verbosity,
+        got_interesting,
+    )
 }
 
 #[cfg(feature = "rust-core")]
@@ -3484,6 +3550,34 @@ fn local_value_candidate_bytes_if_interesting<F: FnMut(TestCase)>(
                 None
             }
         })
+}
+
+#[cfg(feature = "rust-core")]
+fn local_mixed_list_candidate_choices_if_interesting<F: FnMut(TestCase)>(
+    seed: u64,
+    candidate: &[DataValue],
+    test_fn: &mut F,
+    verbosity: Verbosity,
+    got_interesting: &Arc<AtomicBool>,
+) -> Option<Vec<Choice>> {
+    let backend = Rc::new(RefCell::new(LocalBackend::from_seed(seed)));
+    backend
+        .borrow_mut()
+        .force_first_value(DataValue::List(candidate.to_vec()));
+    let is_interesting = matches!(
+        run_test_case(
+            TestBackend::Local {
+                backend: Rc::clone(&backend),
+            },
+            test_fn,
+            false,
+            verbosity,
+            got_interesting,
+        ),
+        TestCaseResult::Interesting { .. }
+    );
+
+    is_interesting.then(|| backend.borrow().recorded_choices().to_vec())
 }
 
 #[cfg(feature = "rust-core")]
