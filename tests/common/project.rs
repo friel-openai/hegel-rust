@@ -4,7 +4,7 @@
 use super::utils::assert_matches_regex;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
 
@@ -13,11 +13,15 @@ use tempfile::TempDir;
 //
 // We clear the dir at the start to ensure a fresh environment on each test run.
 static SHARED_TARGET_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    let path = std::env::temp_dir().join("hegel-test-cargo-target");
+    let path = std::env::temp_dir().join(format!("hegel-test-cargo-target-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).unwrap();
     path
 });
+
+// Cargo can still race while writing shared dependency artifacts for distinct
+// temp packages, so serialize invocations that use the shared target dir.
+static CARGO_COMMAND_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 // use a unique package name in our Cargo.toml to avoid lock contention of parallel
 // cargo builds within the shared target dir.
@@ -103,23 +107,27 @@ impl TempRustProject {
     }
 
     fn cargo(&self, args: &[&str]) -> RunOutput {
-        let cached_target = &*SHARED_TARGET_DIR;
+        let output = {
+            let _cargo_lock = CARGO_COMMAND_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let cached_target = &*SHARED_TARGET_DIR;
 
-        let hegel_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let features = if self.features.is_empty() {
-            String::new()
-        } else {
-            format!(
-                ", features = [{}]",
-                self.features
-                    .iter()
-                    .map(|f| format!("\"{}\"", f))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        let cargo_toml = format!(
-            r#"[package]
+            let hegel_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let features = if self.features.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", features = [{}]",
+                    self.features
+                        .iter()
+                        .map(|f| format!("\"{}\"", f))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let cargo_toml = format!(
+                r#"[package]
 name = "{crate_name}"
 version = "0.1.0"
 edition = "2021"
@@ -127,25 +135,26 @@ edition = "2021"
 [dependencies]
 hegeltest = {{ path = "{path}"{features} }}
 "#,
-            crate_name = self.crate_name,
-            path = hegel_path.display(),
-            features = features,
-        );
-        std::fs::write(self.project_path.join("Cargo.toml"), cargo_toml).unwrap();
+                crate_name = self.crate_name,
+                path = hegel_path.display(),
+                features = features,
+            );
+            std::fs::write(self.project_path.join("Cargo.toml"), cargo_toml).unwrap();
 
-        let mut cmd = Command::new(env!("CARGO"));
-        cmd.args(args)
-            .current_dir(&self.project_path)
-            .env("CARGO_TARGET_DIR", cached_target);
+            let mut cmd = Command::new(env!("CARGO"));
+            cmd.args(args)
+                .current_dir(&self.project_path)
+                .env("CARGO_TARGET_DIR", cached_target);
 
-        for key in &self.env_removes {
-            cmd.env_remove(key);
-        }
-        for (key, value) in &self.env_vars {
-            cmd.env(key, value);
-        }
+            for key in &self.env_removes {
+                cmd.env_remove(key);
+            }
+            for (key, value) in &self.env_vars {
+                cmd.env(key, value);
+            }
 
-        let output = cmd.output().unwrap();
+            cmd.output().unwrap()
+        };
 
         let run_output = RunOutput {
             status: output.status,
